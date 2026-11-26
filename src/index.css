@@ -1,0 +1,361 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Outfit", system-ui, -apple-system, sans-serif;
+  --font-sans: "Manrope", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-obsidian: #050608;
+  --color-void: #0A0D14;
+  --color-surface: #10141D;
+  --color-ink: #F5F7FA;
+  --color-muted: #969EAE;
+  --color-cosmic: #4F7DF3;
+  --color-indigo-accent: #6366F1;
+  --color-violet-accent: #8B5CF6;
+  --color-ice: #E6EEFF;
+}
+
+:root {
+  --theme-bg: #050608;
+  --theme-bg-alt: #080B12;
+  --theme-surface: #0A0D14;
+  --theme-surface-elevated: #101521;
+  --theme-ink: #F5F7FA;
+  --theme-ink-soft: #DCE2EE;
+  --theme-muted: #969EAE;
+  --theme-border: rgba(245, 247, 250, 0.08);
+  --theme-border-strong: rgba(245, 247, 250, 0.16);
+  --theme-accent: #4F7DF3;
+  --theme-cta-bg: #F5F7FA;
+  --theme-cta-bg-hover: #DCE7FF;
+  --theme-cta-ink: #050608;
+  --theme-charm-bg: radial-gradient(ellipse 52% 62% at 50% 44%, rgba(79, 125, 243, 0.11) 0%, rgba(16, 20, 29, 0.45) 45%, rgba(5, 6, 8, 0.92) 85%);
+  --theme-charm-wordmark: rgba(245, 247, 250, 0.92);
+}
+
+/* Engaging Light Theme 1: Glacier Sky */
+html[data-theme="sky"] {
+  --theme-bg: #EEF4FF;
+  --theme-bg-alt: #E5EEFE;
+  --theme-surface: #FFFFFF;
+  --theme-surface-elevated: #F4F8FF;
+  --theme-ink: #0C1527;
+  --theme-ink-soft: #1E293B;
+  --theme-muted: #475569;
+  --theme-border: rgba(15, 23, 42, 0.10);
+  --theme-border-strong: rgba(15, 23, 42, 0.20);
+  --theme-accent: #2563EB;
+  --theme-cta-bg: #0F172A;
+  --theme-cta-bg-hover: #1E3A8A;
+  --theme-cta-ink: #FFFFFF;
+  --theme-charm-bg: radial-gradient(ellipse 62% 70% at 50% 45%, rgba(37, 99, 235, 0.14) 0%, rgba(224, 237, 255, 0.8) 55%, rgba(238, 244, 255, 1) 92%);
+  --theme-charm-wordmark: rgba(12, 21, 39, 0.92);
+}
+
+/* Engaging Light Theme 2: Daylight Ivory */
+html[data-theme="ivory"] {
+  --theme-bg: #F8F5EE;
+  --theme-bg-alt: #F1ECE1;
+  --theme-surface: #FFFFFF;
+  --theme-surface-elevated: #FAF7F0;
+  --theme-ink: #161412;
+  --theme-ink-soft: #2C2722;
+  --theme-muted: #575049;
+  --theme-border: rgba(22, 20, 18, 0.10);
+  --theme-border-strong: rgba(22, 20, 18, 0.20);
+  --theme-accent: #4338CA;
+  --theme-cta-bg: #161412;
+  --theme-cta-bg-hover: #312E81;
+  --theme-cta-ink: #FFFFFF;
+  --theme-charm-bg: radial-gradient(ellipse 62% 70% at 50% 45%, rgba(67, 56, 202, 0.11) 0%, rgba(244, 238, 226, 0.85) 55%, rgba(248, 245, 238, 1) 92%);
+  --theme-charm-wordmark: rgba(22, 20, 18, 0.92);
+}
+
+/* Engaging Light Theme 3: Soft Blossom */
+html[data-theme="blossom"] {
+  --theme-bg: #FDF3EE;
+  --theme-bg-alt: #F8EAE3;
+  --theme-surface: #FFFFFF;
+  --theme-surface-elevated: #FEF7F4;
+  --theme-ink: #1C1318;
+  --theme-ink-soft: #36252F;
+  --theme-muted: #644C58;
+  --theme-border: rgba(28, 19, 24, 0.10);
+  --theme-border-strong: rgba(28, 19, 24, 0.20);
+  --theme-accent: #7C3AED;
+  --theme-cta-bg: #1C1318;
+  --theme-cta-bg-hover: #5B21B6;
+  --theme-cta-ink: #FFFFFF;
+  --theme-charm-bg: radial-gradient(ellipse 62% 70% at 50% 45%, rgba(124, 58, 237, 0.12) 0%, rgba(251, 235, 228, 0.85) 55%, rgba(253, 243, 238, 1) 92%);
+  --theme-charm-wordmark: rgba(28, 19, 24, 0.92);
+}
+
+@layer base {
+  html {
+    background-color: var(--theme-bg);
+    color: var(--theme-ink);
+    font-family: var(--font-sans);
+    color-scheme: dark;
+    overflow-x: clip;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+
+  body {
+    background-color: var(--theme-bg);
+    color: var(--theme-ink);
+    font-family: var(--font-sans);
+    letter-spacing: 0.01em;
+    overflow-x: clip;
+    transition: background-color 260ms ease, color 260ms ease;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--theme-accent);
+    outline-offset: 3px;
+  }
+}
+
+/* Tactile fine cinema film grain — eliminates flat digital banding */
+.cinema-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+/* Subtle architectural drafting grid */
+.bg-architectural-grid {
+  background-image:
+    linear-gradient(to right, rgba(245, 247, 250, 0.032) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(245, 247, 250, 0.032) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+/* Precision hairline utilities */
+.hairline-t {
+  border-top: 1px solid var(--theme-border);
+}
+
+.hairline-b {
+  border-bottom: 1px solid var(--theme-border);
+}
+
+.hairline {
+  border: 1px solid var(--theme-border);
+}
+
+/* Refined scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--theme-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1B2130;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2E3952;
+}
+
+/* ============================================================================
+   High-Contrast Light Theme Surface & Typography Adaptation
+   Preserves .keep-dark-stage blocks (3D Hero, Orbital Map, Constellation Canvas,
+   Blueprints, Photo Overlays) with crisp dark contrast.
+   ============================================================================ */
+html[data-theme="sky"] ::-webkit-scrollbar-thumb,
+html[data-theme="ivory"] ::-webkit-scrollbar-thumb,
+html[data-theme="blossom"] ::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.22);
+}
+
+html[data-theme="sky"] ::-webkit-scrollbar-thumb:hover,
+html[data-theme="ivory"] ::-webkit-scrollbar-thumb:hover,
+html[data-theme="blossom"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.38);
+}
+
+/* Page & Section Grounds */
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.bg-\[\#050608\], .bg-\[\#050608\]\/95, .bg-\[\#050608\]\/98, .bg-\[\#050608\]\/80):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  background-color: var(--theme-bg) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.bg-\[\#070A10\], .bg-\[\#080B12\], .bg-\[\#080B12\]\/95):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  background-color: var(--theme-bg-alt) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.bg-\[\#0A0D14\], .bg-\[\#0A0D14\]\/90, .bg-\[\#0A0D14\]\/75, .bg-\[\#0F131C\], .bg-\[\#0F1420\], .bg-\[\#07090F\]):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  background-color: var(--theme-surface) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.bg-\[\#10141D\], .bg-\[\#101521\], .bg-\[\#0E1320\]):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  background-color: var(--theme-surface-elevated) !important;
+}
+
+/* Subtle Soft Shadows on Elevated Light Cards & Docks */
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(header, nav[aria-label="App screen navigation"], article, form, [role="menu"]):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  box-shadow: 0 6px 28px rgba(15, 23, 42, 0.05);
+}
+
+/* Primary CTA Buttons (Dark Ink Pill on Light Grounds) */
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  .bg-\[\#F5F7FA\]:not(.keep-dark-stage):not(.keep-dark-stage *) {
+  background-color: var(--theme-cta-bg) !important;
+  color: var(--theme-cta-ink) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  .bg-\[\#F5F7FA\]:not(.keep-dark-stage):not(.keep-dark-stage *):hover {
+  background-color: var(--theme-cta-bg-hover) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  .bg-\[\#F5F7FA\]:not(.keep-dark-stage):not(.keep-dark-stage *) * {
+  color: inherit !important;
+}
+
+/* Text Ink Inversion for Crisp WCAG AA Contrast */
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.text-\[\#F5F7FA\], .text-\[\#F5F7FA\]\/95, .text-\[\#F5F7FA\]\/92, .text-\[\#F5F7FA\]\/90, .text-\[\#F5F7FA\]\/85, .text-\[\#F5F7FA\]\/80, .text-\[\#F5F7FA\]\/75):not(.keep-dark-stage):not(.keep-dark-stage *):not(.bg-\[\#F5F7FA\]) {
+  color: var(--theme-ink) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.text-\[\#DCE2EE\], .text-\[\#DCE7FF\], .text-\[\#DCE7FF\]\/92, .text-\[\#E2E8F0\], .text-\[\#CBD5E1\], .text-\[\#CBD5E1\]\/90, .text-\[\#CBD5E1\]\/85, .text-\[\#CBD5E1\]\/80):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  color: var(--theme-ink-soft) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.text-\[\#969EAE\], .text-\[\#969EAE\]\/85, .text-\[\#969EAE\]\/80, .text-\[\#969EAE\]\/75, .text-\[\#969EAE\]\/70, .text-\[\#969EAE\]\/65, .text-\[\#9FA8BA\], .text-\[\#A8B1C4\], .text-\[\#B5BDD0\]):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  color: var(--theme-muted) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  .text-white\/\[0\.08\]:not(.keep-dark-stage):not(.keep-dark-stage *) {
+  color: rgba(15, 23, 42, 0.08) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  .text-\[\#4F7DF3\]:not(.keep-dark-stage):not(.keep-dark-stage *) {
+  color: var(--theme-accent) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  .bg-\[\#4F7DF3\]:not(.keep-dark-stage):not(.keep-dark-stage *) {
+  background-color: var(--theme-accent) !important;
+}
+
+/* Crisp Architectural Borders in Light Mode */
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.border-white\/\[0\.06\], .border-white\/\[0\.07\], .border-white\/\[0\.08\], .border-white\/\[0\.1\], .border-white\/10, .border-white\/12, .border-white\/\[0\.14\], .border-white\/15, .border-white\/20, .border-white\/25):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  border-color: var(--theme-border) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  .divide-white\/\[0\.08\] > :not(:first-child) {
+  border-color: var(--theme-border) !important;
+}
+
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  :is(.bg-white\/\[0\.06\], .bg-white\/\[0\.08\], .bg-white\/\[0\.09\], .bg-white\/12):not(.keep-dark-stage):not(.keep-dark-stage *) {
+  background-color: rgba(15, 23, 42, 0.08) !important;
+}
+
+/* Active Header Link Underline on Light Themes */
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  header nav .bg-\[\#F5F7FA\] {
+  background-color: var(--theme-accent) !important;
+}
+
+/* Subtle Film Grain Opacity on Light Themes */
+:is(html[data-theme="sky"], html[data-theme="ivory"], html[data-theme="blossom"])
+  .cinema-grain {
+  opacity: 0.015 !important;
+}
+
+/* Clean Document Printing for Legal & Trust Center */
+@media print {
+  header,
+  footer,
+  nav[aria-label="App screen navigation"],
+  aside,
+  .cinema-grain {
+    display: none !important;
+  }
+
+  body,
+  #legal-center,
+  #legal-center article,
+  #legal-center article > div {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    box-shadow: none !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  #legal-center p,
+  #legal-center li,
+  #legal-center span,
+  #legal-center h1,
+  #legal-center h2 {
+    color: #0f172a !important;
+  }
+}
+
+@keyframes orbitPulseDash {
+  0% {
+    stroke-dashoffset: 220;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-orbit-pulse {
+  stroke-dasharray: 28 192;
+  animation: orbitPulseDash 4.8s linear infinite;
+}
+
+@keyframes slowSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-slow-spin {
+  animation: slowSpin 90s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-orbit-pulse,
+  .animate-slow-spin {
+    animation: none;
+  }
+  .animate-orbit-pulse {
+    stroke-dasharray: none;
+  }
+}

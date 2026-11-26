@@ -1,0 +1,6 @@
+{
+  "name": "NEXUS — Global Technology Ecosystem",
+  "description": "An evolving digital ecosystem of independent platforms, educational tools, creative projects, and future technology ventures.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

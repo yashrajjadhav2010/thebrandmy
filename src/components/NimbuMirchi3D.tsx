@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 
 // Pre-allocated math helpers outside render loop (Zero GC per frame)
 const _mouse = new THREE.Vector2();
@@ -10,15 +11,7 @@ const _intersectPt = new THREE.Vector3();
 const _vDir = new THREE.Vector3();
 const _vUp = new THREE.Vector3(0, -1, 0);
 const _quat = new THREE.Quaternion();
-const _ropeCurvePts = [
-  new THREE.Vector3(),
-  new THREE.Vector3(),
-  new THREE.Vector3(),
-  new THREE.Vector3(),
-  new THREE.Vector3(),
-  new THREE.Vector3(),
-  new THREE.Vector3(),
-];
+const _ropeCurvePts = Array.from({ length: 10 }, () => new THREE.Vector3());
 
 function detectSoftwareWebGL(): boolean {
   try {
@@ -36,68 +29,276 @@ function detectSoftwareWebGL(): boolean {
 }
 
 /**
- * Procedural organic citrus peel textures (albedo + dimpled bump map)
+ * Deterministic PRNG for repeatable photorealistic procedural surface maps
  */
-function createLemonTextures(maxAnisotropy: number) {
-  const size = 512;
+function createSeededRandom(seedStart: number) {
+  let seed = seedStart % 2147483647;
+  if (seed <= 0) seed += 2147483646;
+  return () => {
+    seed = (seed * 16807) % 2147483647;
+    return (seed - 1) / 2147483646;
+  };
+}
 
-  // Albedo canvas
+/**
+ * Converts a scalar heightfield into a crisp tangent-space Normal Map DataTexture
+ * using wrap-around Sobel derivatives (linear NoColorSpace).
+ */
+function heightFieldToNormalTexture(
+  height: Float32Array,
+  width: number,
+  heightPx: number,
+  strength: number,
+  maxAnisotropy: number,
+  wrapT: THREE.Wrapping = THREE.ClampToEdgeWrapping
+): THREE.DataTexture {
+  const data = new Uint8Array(width * heightPx * 4);
+
+  const sample = (x: number, y: number) => {
+    const wx = ((x % width) + width) % width;
+    const wy =
+      wrapT === THREE.RepeatWrapping
+        ? ((y % heightPx) + heightPx) % heightPx
+        : Math.max(0, Math.min(heightPx - 1, y));
+    return height[wy * width + wx];
+  };
+
+  for (let y = 0; y < heightPx; y++) {
+    for (let x = 0; x < width; x++) {
+      const tl = sample(x - 1, y - 1);
+      const t = sample(x, y - 1);
+      const tr = sample(x + 1, y - 1);
+      const l = sample(x - 1, y);
+      const r = sample(x + 1, y);
+      const bl = sample(x - 1, y + 1);
+      const b = sample(x, y + 1);
+      const br = sample(x + 1, y + 1);
+
+      const dx = (tr + 2 * r + br - (tl + 2 * l + bl)) * strength;
+      const dy = (bl + 2 * b + br - (tl + 2 * t + tr)) * strength;
+
+      const nx = -dx;
+      const ny = dy;
+      const nz = 1.0;
+      const invLen = 1 / Math.sqrt(nx * nx + ny * ny + nz * nz);
+
+      const idx = (y * width + x) * 4;
+      data[idx] = Math.round((nx * invLen * 0.5 + 0.5) * 255);
+      data[idx + 1] = Math.round((ny * invLen * 0.5 + 0.5) * 255);
+      data[idx + 2] = Math.round((nz * invLen * 0.5 + 0.5) * 255);
+      data[idx + 3] = 255;
+    }
+  }
+
+  const tex = new THREE.DataTexture(data, width, heightPx, THREE.RGBAFormat);
+  tex.flipY = true;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = wrapT;
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = maxAnisotropy;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/**
+ * Injects lightweight organic Subsurface Scattering (backlit translucency + warm wrap)
+ * directly into Three.js MeshPhysicalMaterial so botanical flesh glows naturally under light.
+ */
+function applyBotanicalSubsurface(
+  material: THREE.MeshPhysicalMaterial,
+  sssColorHex: number,
+  strength: number
+) {
+  const sssColor = new THREE.Color(sssColorHex);
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uSssColor = { value: sssColor };
+    shader.uniforms.uSssStrength = { value: strength };
+    shader.uniforms.uBackLightDir = {
+      value: new THREE.Vector3(-0.42, 0.55, -0.72).normalize(),
+    };
+    shader.uniforms.uKeyLightDir = {
+      value: new THREE.Vector3(0.46, 0.62, 0.63).normalize(),
+    };
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform vec3 uSssColor;
+        uniform float uSssStrength;
+        uniform vec3 uBackLightDir;
+        uniform vec3 uKeyLightDir;`
+      )
+      .replace(
+        '#include <lights_fragment_end>',
+        `#include <lights_fragment_end>
+        vec3 sssViewDir = normalize(vViewPosition);
+        vec3 sssNormal = normalize(normal);
+        vec3 backDirView = normalize((viewMatrix * vec4(uBackLightDir, 0.0)).xyz);
+        vec3 keyDirView = normalize((viewMatrix * vec4(uKeyLightDir, 0.0)).xyz);
+        float backScatter = pow(clamp(dot(sssViewDir, -normalize(backDirView + sssNormal * 0.38)), 0.0, 1.0), 2.4);
+        float rimThin = pow(1.0 - clamp(dot(sssNormal, sssViewDir), 0.0, 1.0), 2.1);
+        float wrapKey = clamp((dot(sssNormal, keyDirView) + 0.55) / 1.55, 0.0, 1.0);
+        reflectedLight.directDiffuse += uSssColor * uSssStrength * (backScatter * 0.72 + rimThin * 0.34 + wrapKey * 0.16);`
+      );
+  };
+  material.customProgramCacheKey = () =>
+    `botanical-sss-${sssColorHex.toString(16)}-${strength.toFixed(2)}`;
+}
+
+/**
+ * High-detail procedural Indian Kagzi Lemon PBR maps:
+ * - Albedo (SRGB): sun-ripened yellow gradient, lime-green polar tint, pore tint, micro orchard freckles
+ * - Normal Map (Linear): Sobel tangent-space oil-gland dimples + organic rind wave
+ * - Roughness Map (Linear): matte oil-gland pits vs glossy waxy ridges between pores
+ */
+function createLemonPBRMaps(maxAnisotropy: number) {
+  const size = 512;
+  const rand = createSeededRandom(4219);
+
   const colorCanvas = document.createElement('canvas');
   colorCanvas.width = size;
   colorCanvas.height = size;
   const cCtx = colorCanvas.getContext('2d');
 
-  // Bump canvas (oil gland dimples)
-  const bumpCanvas = document.createElement('canvas');
-  bumpCanvas.width = size;
-  bumpCanvas.height = size;
-  const bCtx = bumpCanvas.getContext('2d');
+  const roughCanvas = document.createElement('canvas');
+  roughCanvas.width = size;
+  roughCanvas.height = size;
+  const rCtx = roughCanvas.getContext('2d');
 
-  if (cCtx && bCtx) {
-    // Rich, saturated sun-ripe lemon yellow with warm golden shading & subtle green polar tips
+  const height = new Float32Array(size * size);
+
+  // Base organic low-frequency rind undulation
+  for (let y = 0; y < size; y++) {
+    const v = y / size;
+    const poleFactor = Math.sin(v * Math.PI);
+    for (let x = 0; x < size; x++) {
+      const u = (x / size) * Math.PI * 2;
+      const wave =
+        Math.sin(u * 5 + v * 7) * 0.06 +
+        Math.cos(u * 9 - v * 11) * 0.04 +
+        Math.sin(u * 14 + v * 19) * 0.025;
+      // Subtle radiating pucker creases near top and bottom poles
+      const polarCrease =
+        (1 - poleFactor) *
+        (1 - poleFactor) *
+        (Math.sin(u * 13) * 0.18 + Math.cos(u * 21) * 0.1);
+      height[y * size + x] = 0.62 + wave * poleFactor + polarCrease;
+    }
+  }
+
+  if (cCtx && rCtx) {
+    // Authentic sun-ripened Indian lemon albedo with delicate green-gold polar transitions
     const grad = cCtx.createLinearGradient(0, 0, 0, size);
-    grad.addColorStop(0.0, '#999c0a');
-    grad.addColorStop(0.12, '#e6b800');
-    grad.addColorStop(0.48, '#ffd000');
-    grad.addColorStop(0.84, '#e5aa00');
-    grad.addColorStop(1.0, '#a67b00');
+    grad.addColorStop(0.0, '#728212');
+    grad.addColorStop(0.08, '#c9b30c');
+    grad.addColorStop(0.22, '#f0c40c');
+    grad.addColorStop(0.5, '#ffd716');
+    grad.addColorStop(0.78, '#f0ba08');
+    grad.addColorStop(0.93, '#c89b0a');
+    grad.addColorStop(1.0, '#6c6812');
     cCtx.fillStyle = grad;
     cCtx.fillRect(0, 0, size, size);
 
-    bCtx.fillStyle = '#909090';
-    bCtx.fillRect(0, 0, size, size);
-
-    // Deterministic organic citrus oil-gland pores
-    let seed = 4219;
-    const rand = () => {
-      seed = (seed * 16807) % 2147483647;
-      return (seed - 1) / 2147483646;
-    };
-
-    for (let i = 0; i < 4200; i++) {
-      const x = rand() * size;
-      const y = rand() * size;
-      const r = 1.1 + rand() * 2.1;
-
-      // Vivid warm citrus pore contrast on albedo
-      cCtx.fillStyle =
-        rand() > 0.45
-          ? 'rgba(176, 112, 0, 0.24)'
-          : 'rgba(255, 224, 30, 0.22)';
+    // Subtle sun-mottled warm/cool organic patches across the lemon skin
+    for (let i = 0; i < 65; i++) {
+      const px = rand() * size;
+      const py = (0.1 + rand() * 0.8) * size;
+      const pr = 22 + rand() * 48;
+      const patchGrad = cCtx.createRadialGradient(px, py, 0, px, py, pr);
+      if (rand() > 0.35) {
+        patchGrad.addColorStop(0, 'rgba(255, 224, 48, 0.14)');
+        patchGrad.addColorStop(1, 'rgba(255, 224, 48, 0)');
+      } else {
+        patchGrad.addColorStop(0, 'rgba(155, 165, 16, 0.13)');
+        patchGrad.addColorStop(1, 'rgba(155, 165, 16, 0)');
+      }
+      cCtx.fillStyle = patchGrad;
       cCtx.beginPath();
-      cCtx.arc(x, y, r, 0, Math.PI * 2);
+      cCtx.arc(px, py, pr, 0, Math.PI * 2);
+      cCtx.fill();
+    }
+
+    // Waxy smooth base roughness (~0.27 -> 69/255)
+    rCtx.fillStyle = 'rgb(72, 72, 72)';
+    rCtx.fillRect(0, 0, size, size);
+
+    // 4,600 realistic concave citrus oil-gland dimples stamped into albedo, roughness, and heightfield
+    for (let i = 0; i < 4600; i++) {
+      const cx = rand() * size;
+      const cy = rand() * size;
+      const v = cy / size;
+      const latScale = 0.65 + Math.sin(v * Math.PI) * 0.45;
+      const r = (1.35 + rand() * 2.05) * latScale;
+      const depth = 0.24 + rand() * 0.26;
+
+      // Stamp concave dimple with slightly raised waxy collar into heightfield
+      const rInt = Math.ceil(r * 1.65);
+      const x0 = Math.floor(cx);
+      const y0 = Math.floor(cy);
+      for (let oy = -rInt; oy <= rInt; oy++) {
+        const py = y0 + oy;
+        if (py < 0 || py >= size) continue;
+        for (let ox = -rInt; ox <= rInt; ox++) {
+          const px = ((x0 + ox) % size + size) % size;
+          const dist = Math.sqrt(ox * ox + oy * oy) / r;
+          if (dist < 1.0) {
+            const pit = (1 - dist * dist) * depth;
+            height[py * size + px] -= pit;
+          } else if (dist < 1.55) {
+            const rim = Math.sin(((dist - 1.0) / 0.55) * Math.PI) * depth * 0.22;
+            height[py * size + px] += rim;
+          }
+        }
+      }
+
+      // Deep amber-gold pore recess tint on albedo
+      const poreGrad = cCtx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.25);
+      poreGrad.addColorStop(0, 'rgba(150, 92, 0, 0.30)');
+      poreGrad.addColorStop(0.6, 'rgba(196, 134, 0, 0.10)');
+      poreGrad.addColorStop(1, 'rgba(255, 232, 70, 0)');
+      cCtx.fillStyle = poreGrad;
+      cCtx.beginPath();
+      cCtx.arc(cx, cy, r * 1.25, 0, Math.PI * 2);
       cCtx.fill();
 
-      // Pitted dimple on bump map (dark center, lighter rim)
-      const pGrad = bCtx.createRadialGradient(x, y, 0, x, y, r * 1.4);
-      pGrad.addColorStop(0, 'rgba(35, 35, 35, 0.85)');
-      pGrad.addColorStop(0.65, 'rgba(130, 130, 130, 0.45)');
-      pGrad.addColorStop(1, 'rgba(200, 200, 200, 0)');
-      bCtx.fillStyle = pGrad;
-      bCtx.beginPath();
-      bCtx.arc(x, y, r * 1.4, 0, Math.PI * 2);
-      bCtx.fill();
+      // Pores are slightly rougher (more matte inside pits, shinier on raised ridges)
+      rCtx.fillStyle = 'rgba(158, 158, 158, 0.48)';
+      rCtx.beginPath();
+      rCtx.arc(cx, cy, r * 0.85, 0, Math.PI * 2);
+      rCtx.fill();
     }
+
+    // Authentic subtle orchard micro-speckles & tiny natural brown pinpoints (instant photorealism)
+    for (let i = 0; i < 42; i++) {
+      const fx = rand() * size;
+      const fy = (0.14 + rand() * 0.72) * size;
+      const fr = 0.8 + rand() * 1.9;
+      cCtx.fillStyle = `rgba(116, 76, 22, ${0.22 + rand() * 0.28})`;
+      cCtx.beginPath();
+      cCtx.arc(fx, fy, fr, 0, Math.PI * 2);
+      cCtx.fill();
+
+      rCtx.fillStyle = 'rgba(195, 195, 195, 0.65)';
+      rCtx.beginPath();
+      rCtx.arc(fx, fy, fr * 1.2, 0, Math.PI * 2);
+      rCtx.fill();
+    }
+
+    // Subtle darkened puncture rings at exact top & bottom thread pierce poles
+    const topPin = cCtx.createLinearGradient(0, 0, 0, size * 0.055);
+    topPin.addColorStop(0, 'rgba(42, 36, 12, 0.72)');
+    topPin.addColorStop(1, 'rgba(42, 36, 12, 0)');
+    cCtx.fillStyle = topPin;
+    cCtx.fillRect(0, 0, size, size * 0.055);
+
+    const botPin = cCtx.createLinearGradient(0, size * 0.945, 0, size);
+    botPin.addColorStop(0, 'rgba(46, 38, 12, 0)');
+    botPin.addColorStop(1, 'rgba(46, 38, 12, 0.65)');
+    cCtx.fillStyle = botPin;
+    cCtx.fillRect(0, size * 0.945, size, size * 0.055);
   }
 
   const map = new THREE.CanvasTexture(colorCanvas);
@@ -106,102 +307,221 @@ function createLemonTextures(maxAnisotropy: number) {
   map.wrapT = THREE.ClampToEdgeWrapping;
   map.anisotropy = maxAnisotropy;
 
-  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
-  bumpMap.wrapS = THREE.RepeatWrapping;
-  bumpMap.wrapT = THREE.ClampToEdgeWrapping;
-  bumpMap.anisotropy = maxAnisotropy;
+  const roughnessMap = new THREE.CanvasTexture(roughCanvas);
+  roughnessMap.wrapS = THREE.RepeatWrapping;
+  roughnessMap.wrapT = THREE.ClampToEdgeWrapping;
+  roughnessMap.anisotropy = maxAnisotropy;
 
-  return { map, bumpMap };
+  const normalMap = heightFieldToNormalTexture(
+    height,
+    size,
+    size,
+    1.85,
+    maxAnisotropy,
+    THREE.ClampToEdgeWrapping
+  );
+
+  return { map, normalMap, roughnessMap };
 }
 
 /**
- * Procedural waxy green chili albedo + subtle longitudinal skin variation
+ * Photorealistic waxy green Indian chili PBR maps (Albedo + Normal + Roughness)
  */
-function createChiliTexture(
+function createChiliPBRMaps(
   baseHex: string,
   highlightHex: string,
   tipHex: string,
+  seed: number,
   maxAnisotropy: number
-): THREE.CanvasTexture {
-  const w = 256;
+) {
+  const w = 512;
   const h = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d');
+  const rand = createSeededRandom(seed);
 
-  if (ctx) {
-    const grad = ctx.createLinearGradient(0, 0, w, 0);
-    grad.addColorStop(0, tipHex);
-    grad.addColorStop(0.28, baseHex);
-    grad.addColorStop(0.62, highlightHex);
-    grad.addColorStop(0.88, baseHex);
-    grad.addColorStop(1, '#09380b');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, w, h);
+  const colorCanvas = document.createElement('canvas');
+  colorCanvas.width = w;
+  colorCanvas.height = h;
+  const cCtx = colorCanvas.getContext('2d');
 
-    // Subtle organic botanical streaks along length of pepper
-    for (let i = 0; i < 42; i++) {
-      const y = (i / 42) * h;
-      ctx.fillStyle =
-        i % 2 === 0
-          ? 'rgba(90, 220, 45, 0.08)'
-          : 'rgba(4, 34, 6, 0.12)';
-      ctx.fillRect(0, y, w, 3);
+  const roughCanvas = document.createElement('canvas');
+  roughCanvas.width = w;
+  roughCanvas.height = h;
+  const rCtx = roughCanvas.getContext('2d');
+
+  const height = new Float32Array(w * h);
+
+  // Sculpt longitudinal natural pepper flutes + fine shoulder wrinkles + organic surface ripples
+  for (let y = 0; y < h; y++) {
+    const theta = (y / h) * Math.PI * 2;
+    for (let x = 0; x < w; x++) {
+      const t = x / w; // 0 = pointed tip, 1 = calyx shoulder
+      const shoulderMask = Math.max(0, (t - 0.68) / 0.32);
+      const midMask = Math.sin(t * Math.PI);
+
+      // Gentle 3-4 longitudinal ribs + natural subtle transverse crease ripples
+      const ribs =
+        Math.sin(theta * 3 + t * 1.8) * 0.14 * midMask +
+        Math.cos(theta * 5 - t * 2.4) * 0.06 * midMask;
+      const shoulderWrinkles =
+        shoulderMask *
+        shoulderMask *
+        (Math.sin(theta * 14 + t * 9) * 0.16 + Math.cos(t * 48) * 0.07);
+      const fineRipple =
+        Math.sin(t * 28 + Math.sin(theta * 2) * 1.5) * 0.045 * midMask;
+
+      height[y * w + x] = 0.5 + ribs + shoulderWrinkles + fineRipple;
     }
   }
 
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.anisotropy = maxAnisotropy;
-  return texture;
+  if (cCtx && rCtx) {
+    // Rich botanical green gradient along chili length (tip -> body -> shoulder)
+    const grad = cCtx.createLinearGradient(0, 0, w, 0);
+    grad.addColorStop(0.0, tipHex);
+    grad.addColorStop(0.14, baseHex);
+    grad.addColorStop(0.55, highlightHex);
+    grad.addColorStop(0.84, baseHex);
+    grad.addColorStop(1.0, '#103f0c');
+    cCtx.fillStyle = grad;
+    cCtx.fillRect(0, 0, w, h);
+
+    // Subtle botanical chlorophyll striations along the length
+    for (let i = 0; i < 64; i++) {
+      const sy = rand() * h;
+      const sh = 1.5 + rand() * 4.5;
+      cCtx.fillStyle =
+        rand() > 0.45
+          ? 'rgba(130, 232, 58, 0.085)'
+          : 'rgba(6, 36, 8, 0.12)';
+      cCtx.fillRect(0, sy, w, sh);
+    }
+
+    // Subtle lighter chartreuse sun-side glow along mid-body
+    const sunGrad = cCtx.createRadialGradient(
+      w * 0.52,
+      h * 0.35,
+      8,
+      w * 0.52,
+      h * 0.35,
+      w * 0.38
+    );
+    sunGrad.addColorStop(0, 'rgba(146, 224, 52, 0.16)');
+    sunGrad.addColorStop(1, 'rgba(146, 224, 52, 0)');
+    cCtx.fillStyle = sunGrad;
+    cCtx.fillRect(0, 0, w, h);
+
+    // Tiny natural organic dark micro-flecks & faint corky heat lines (corking)
+    for (let i = 0; i < 28; i++) {
+      const cx = (0.12 + rand() * 0.76) * w;
+      const cy = rand() * h;
+      cCtx.fillStyle = 'rgba(12, 42, 10, 0.22)';
+      cCtx.beginPath();
+      cCtx.arc(cx, cy, 0.7 + rand() * 1.4, 0, Math.PI * 2);
+      cCtx.fill();
+    }
+
+    // Subtle darkened needle-pierce shadow right around middle belly where thread passes through
+    const pierceX = w * 0.57;
+    for (const py of [h * 0.25, h * 0.75]) {
+      const pGrad = cCtx.createRadialGradient(pierceX, py, 0, pierceX, py, 14);
+      pGrad.addColorStop(0, 'rgba(10, 22, 8, 0.55)');
+      pGrad.addColorStop(1, 'rgba(10, 22, 8, 0)');
+      cCtx.fillStyle = pGrad;
+      cCtx.beginPath();
+      cCtx.arc(pierceX, py, 14, 0, Math.PI * 2);
+      cCtx.fill();
+    }
+
+    // Waxy smooth roughness map (glossy 0.16 belly, slightly more matte 0.36 at tip & shoulder)
+    const rGrad = rCtx.createLinearGradient(0, 0, w, 0);
+    rGrad.addColorStop(0.0, 'rgb(108, 108, 108)');
+    rGrad.addColorStop(0.18, 'rgb(44, 44, 44)');
+    rGrad.addColorStop(0.75, 'rgb(40, 40, 40)');
+    rGrad.addColorStop(1.0, 'rgb(112, 112, 112)');
+    rCtx.fillStyle = rGrad;
+    rCtx.fillRect(0, 0, w, h);
+
+    // Organic waxy sheen variation patches
+    for (let i = 0; i < 38; i++) {
+      const rx = rand() * w;
+      const ry = rand() * h;
+      const rr = 14 + rand() * 34;
+      const rg = rCtx.createRadialGradient(rx, ry, 0, rx, ry, rr);
+      rg.addColorStop(
+        0,
+        rand() > 0.5 ? 'rgba(92, 92, 92, 0.32)' : 'rgba(26, 26, 26, 0.35)'
+      );
+      rg.addColorStop(1, 'rgba(50, 50, 50, 0)');
+      rCtx.fillStyle = rg;
+      rCtx.beginPath();
+      rCtx.arc(rx, ry, rr, 0, Math.PI * 2);
+      rCtx.fill();
+    }
+  }
+
+  const map = new THREE.CanvasTexture(colorCanvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = THREE.ClampToEdgeWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.anisotropy = maxAnisotropy;
+
+  const roughnessMap = new THREE.CanvasTexture(roughCanvas);
+  roughnessMap.wrapS = THREE.ClampToEdgeWrapping;
+  roughnessMap.wrapT = THREE.RepeatWrapping;
+  roughnessMap.anisotropy = maxAnisotropy;
+
+  const normalMap = heightFieldToNormalTexture(
+    height,
+    w,
+    h,
+    1.15,
+    maxAnisotropy,
+    THREE.RepeatWrapping
+  );
+
+  return { map, normalMap, roughnessMap };
 }
 
 /**
- * Procedural twisted black braided cotton thread texture
+ * Multi-ply twisted black cotton thread PBR maps (Albedo + Normal Map)
  */
-function createBraidedThreadTextures(maxAnisotropy: number) {
+function createBraidedThreadPBRMaps(maxAnisotropy: number) {
   const size = 256;
   const colorCanvas = document.createElement('canvas');
   colorCanvas.width = size;
   colorCanvas.height = size;
   const cCtx = colorCanvas.getContext('2d');
 
-  const bumpCanvas = document.createElement('canvas');
-  bumpCanvas.width = size;
-  bumpCanvas.height = size;
-  const bCtx = bumpCanvas.getContext('2d');
+  const height = new Float32Array(size * size);
 
-  if (cCtx && bCtx) {
-    cCtx.fillStyle = '#181a20';
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      // Multi-strand 3-ply twisted cotton cord height pattern
+      const u = (x / size) * Math.PI * 2;
+      const v = (y / size) * Math.PI * 2;
+      const strand = Math.sin(u * 3 + v * 6) * 0.5 + 0.5;
+      const microFiber = Math.sin(u * 18 - v * 24) * 0.14;
+      height[y * size + x] = Math.pow(strand, 0.65) + microFiber;
+    }
+  }
+
+  if (cCtx) {
+    cCtx.fillStyle = '#15171c';
     cCtx.fillRect(0, 0, size, size);
-    bCtx.fillStyle = '#404040';
-    bCtx.fillRect(0, 0, size, size);
 
-    // Diagonal twisted braided yarn strands
-    for (let i = -size; i < size * 2; i += 14) {
+    for (let i = -size; i < size * 2; i += 16) {
       cCtx.strokeStyle = '#2d313d';
-      cCtx.lineWidth = 5;
+      cCtx.lineWidth = 6;
       cCtx.beginPath();
       cCtx.moveTo(i, 0);
       cCtx.lineTo(i + size, size);
       cCtx.stroke();
 
-      cCtx.strokeStyle = '#0d0e12';
-      cCtx.lineWidth = 2;
+      cCtx.strokeStyle = '#090a0d';
+      cCtx.lineWidth = 3;
       cCtx.beginPath();
-      cCtx.moveTo(i + 5, 0);
-      cCtx.lineTo(i + size + 5, size);
+      cCtx.moveTo(i + 6, 0);
+      cCtx.lineTo(i + size + 6, size);
       cCtx.stroke();
-
-      bCtx.strokeStyle = '#dcdcdc';
-      bCtx.lineWidth = 5;
-      bCtx.beginPath();
-      bCtx.moveTo(i, 0);
-      bCtx.lineTo(i + size, size);
-      bCtx.stroke();
     }
   }
 
@@ -209,72 +529,123 @@ function createBraidedThreadTextures(maxAnisotropy: number) {
   map.colorSpace = THREE.SRGBColorSpace;
   map.wrapS = THREE.RepeatWrapping;
   map.wrapT = THREE.RepeatWrapping;
-  map.repeat.set(2, 16);
+  map.repeat.set(2, 18);
   map.anisotropy = maxAnisotropy;
 
-  const bumpMap = new THREE.CanvasTexture(bumpCanvas);
-  bumpMap.wrapS = THREE.RepeatWrapping;
-  bumpMap.wrapT = THREE.RepeatWrapping;
-  bumpMap.repeat.set(2, 16);
-  bumpMap.anisotropy = maxAnisotropy;
+  const normalMap = heightFieldToNormalTexture(
+    height,
+    size,
+    size,
+    2.2,
+    maxAnisotropy,
+    THREE.RepeatWrapping
+  );
+  normalMap.repeat.set(2, 18);
 
-  return { map, bumpMap };
+  return { map, normalMap };
 }
 
 /**
- * Builds an organically sculpted 3D green chili (body + calyx crown + curved woody stem)
+ * Adds subtle glistening fresh water dewdrops onto an organic fruit surface
  */
-function buildOrganicChili(
+function addWaterDewdrops(
+  parent: THREE.Object3D,
+  spots: Array<{ pos: [number, number, number]; radius: number; normal: [number, number, number] }>,
+  dewMat: THREE.Material,
+  disposables: { geometries: THREE.BufferGeometry[] }
+) {
+  const dropGeo = new THREE.SphereGeometry(1, 14, 10);
+  disposables.geometries.push(dropGeo);
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const nVec = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+
+  for (const spot of spots) {
+    const drop = new THREE.Mesh(dropGeo, dewMat);
+    drop.position.set(spot.pos[0], spot.pos[1], spot.pos[2]);
+    nVec.set(spot.normal[0], spot.normal[1], spot.normal[2]).normalize();
+    q.setFromUnitVectors(up, nVec);
+    drop.quaternion.copy(q);
+    // Slightly flattened meniscus hugging the waxy fruit skin
+    drop.scale.set(spot.radius, spot.radius * 0.56, spot.radius * 1.08);
+    parent.add(drop);
+  }
+}
+
+/**
+ * Builds a photorealistic multi-part Indian green chili:
+ * 1. Organically sculpted curved & fluted tapered body with subtle S-bend
+ * 2. Scalloped 5-petal matte calyx crown gripping the shoulder seamlessly
+ * 3. Tapered, ridged, curved woody stem with tan cut-tip end face
+ * 4. Optional fresh water dewdrops
+ */
+function buildRealisticChili(
   length: number,
   maxRadius: number,
   curveBend: number,
+  sCurve: number,
   bodyMat: THREE.Material,
   calyxMat: THREE.Material,
   stemMat: THREE.Material,
+  cutTipMat: THREE.Material,
+  dewMat: THREE.Material | null,
   disposables: { geometries: THREE.BufferGeometry[] }
 ): THREE.Group {
   const group = new THREE.Group();
 
-  // 1. Sculpted Organic Tapered Curved Body (custom swept geometry along curve)
-  const rings = 34;
-  const radialSegs = 22;
+  // 1. Sculpted Organic Tapered Curved Body
+  const rings = 40;
+  const radialSegs = 26;
   const positions: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
 
-  // Spine goes from x = -length*0.58 (pointed tip) to x = +length*0.42 (calyx shoulder)
-  const xStart = -length * 0.58;
-  const xEnd = length * 0.42;
+  const xStart = -length * 0.57;
+  const xEnd = length * 0.43;
+
+  const spinePoint = (t: number) => {
+    const x = THREE.MathUtils.lerp(xStart, xEnd, t);
+    // Natural graceful tip hook + gentle belly sag + organic S-twist
+    const y =
+      Math.pow(1 - t, 2.35) * curveBend -
+      Math.sin(t * Math.PI) * curveBend * 0.34;
+    const z = Math.sin(t * Math.PI * 1.45) * sCurve;
+    return { x, y, z };
+  };
 
   for (let i = 0; i <= rings; i++) {
     const t = i / rings; // 0 = pointed tip, 1 = shoulder base
-    const x = THREE.MathUtils.lerp(xStart, xEnd, t);
-    // Natural slight upward hook at the tip + gentle organic belly dip
-    const centerY =
-      Math.pow(1 - t, 2.2) * curveBend - Math.sin(t * Math.PI) * curveBend * 0.28;
-    const centerZ = Math.sin(t * Math.PI * 1.1) * curveBend * 0.04;
+    const { x, y: centerY, z: centerZ } = spinePoint(t);
 
-    // Authentic chili cross-section radius profile
+    // Authentic Indian Hari Mirch slender tapered profile
     let r: number;
-    if (t < 0.06) {
-      r = maxRadius * (0.04 + (t / 0.06) * 0.18);
-    } else if (t < 0.78) {
-      const u = (t - 0.06) / 0.72;
-      r = maxRadius * (0.22 + Math.pow(u, 0.72) * 0.78);
+    if (t < 0.05) {
+      // Smooth rounded micro-tip (no sharp polygonal spike)
+      const u = t / 0.05;
+      r = maxRadius * (0.015 + Math.sqrt(u) * 0.16);
+    } else if (t < 0.8) {
+      const u = (t - 0.05) / 0.75;
+      r = maxRadius * (0.175 + Math.pow(u, 0.76) * 0.825);
     } else {
-      // Rounded plump shoulder tapering neatly into the calyx
-      const u = (t - 0.78) / 0.22;
-      r = maxRadius * Math.cos(u * Math.PI * 0.44);
+      // Plump rounded shoulder tucking cleanly into the calyx crown
+      const u = (t - 0.8) / 0.2;
+      r = maxRadius * Math.cos(u * Math.PI * 0.46);
     }
 
     for (let j = 0; j <= radialSegs; j++) {
       const v = j / radialSegs;
       const theta = v * Math.PI * 2;
-      // Subtle organic 3-lobe pepper undulation
-      const lobe = 1 + 0.045 * Math.sin(theta * 3 + t * 1.4) * Math.sin(t * Math.PI);
+      const midEnv = Math.sin(t * Math.PI);
+      // Natural 3-lobe + subtle organic longitudinal ridges & slight cross-section ovality
+      const lobe =
+        1 +
+        0.055 * Math.sin(theta * 3 + t * 2.1) * midEnv +
+        0.024 * Math.cos(theta * 5 - t * 3.2) * midEnv +
+        0.018 * Math.sin(t * 16) * midEnv;
       const localR = r * lobe;
 
-      const py = centerY + Math.sin(theta) * localR * 0.94;
+      const py = centerY + Math.sin(theta) * localR * 0.93;
       const pz = centerZ + Math.cos(theta) * localR;
 
       positions.push(x, py, pz);
@@ -301,6 +672,7 @@ function buildOrganicChili(
   bodyGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   bodyGeo.setIndex(indices);
   bodyGeo.computeVertexNormals();
+  bodyGeo.computeTangents();
   disposables.geometries.push(bodyGeo);
 
   const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
@@ -308,101 +680,266 @@ function buildOrganicChili(
   bodyMesh.receiveShadow = true;
   group.add(bodyMesh);
 
-  // 2. Flared Matte Calyx Crown (5 overlapping sepals gripping the shoulder)
+  const shoulderPos = spinePoint(0.96);
+
+  // 2. Sculpted Matte Botanical Calyx Crown (tight flared cup + 5 curved organic sepals)
   const calyxGroup = new THREE.Group();
-  calyxGroup.position.set(xEnd - maxRadius * 0.14, 0, 0);
+  calyxGroup.position.set(shoulderPos.x, shoulderPos.y, shoulderPos.z);
 
   const cupPts = [
-    new THREE.Vector2(maxRadius * 0.16, 0.12),
-    new THREE.Vector2(maxRadius * 0.52, 0.06),
-    new THREE.Vector2(maxRadius * 0.9, -0.08),
-    new THREE.Vector2(maxRadius * 0.72, -0.14),
+    new THREE.Vector2(maxRadius * 0.17, 0.11),
+    new THREE.Vector2(maxRadius * 0.34, 0.06),
+    new THREE.Vector2(maxRadius * 0.78, -0.02),
+    new THREE.Vector2(maxRadius * 0.96, -0.11),
+    new THREE.Vector2(maxRadius * 0.82, -0.15),
     new THREE.Vector2(0.01, -0.05),
   ];
-  const calyxCupGeo = new THREE.LatheGeometry(cupPts, 16);
+  const calyxCupGeo = new THREE.LatheGeometry(cupPts, 18);
   calyxCupGeo.rotateZ(-Math.PI / 2);
+  calyxCupGeo.computeVertexNormals();
   disposables.geometries.push(calyxCupGeo);
   const calyxCup = new THREE.Mesh(calyxCupGeo, calyxMat);
+  calyxCup.castShadow = true;
   calyxGroup.add(calyxCup);
 
-  const sepalGeo = new THREE.ConeGeometry(maxRadius * 0.24, maxRadius * 0.65, 5);
-  sepalGeo.rotateZ(Math.PI / 2.25);
+  // Curved organic sepal petals hugging the chili shoulder (instead of rigid cones)
+  const sepalShape = new THREE.Shape();
+  sepalShape.moveTo(0, -maxRadius * 0.22);
+  sepalShape.quadraticCurveTo(
+    -maxRadius * 0.25,
+    -maxRadius * 0.24,
+    -maxRadius * 0.56,
+    0
+  );
+  sepalShape.quadraticCurveTo(
+    -maxRadius * 0.25,
+    maxRadius * 0.24,
+    0,
+    maxRadius * 0.22
+  );
+  sepalShape.closePath();
+
+  const sepalGeo = new THREE.ExtrudeGeometry(sepalShape, {
+    depth: maxRadius * 0.08,
+    bevelEnabled: true,
+    bevelThickness: maxRadius * 0.025,
+    bevelSize: maxRadius * 0.02,
+    bevelSegments: 2,
+  });
+  sepalGeo.translate(0, 0, -maxRadius * 0.04);
   disposables.geometries.push(sepalGeo);
 
   for (let s = 0; s < 5; s++) {
-    const a = (s / 5) * Math.PI * 2;
+    const angle = (s / 5) * Math.PI * 2 + 0.25;
+    const sepalHolder = new THREE.Group();
+    sepalHolder.rotation.x = angle;
     const sepal = new THREE.Mesh(sepalGeo, calyxMat);
-    sepal.position.set(
-      -maxRadius * 0.16,
-      Math.sin(a) * maxRadius * 0.68,
-      Math.cos(a) * maxRadius * 0.68
-    );
-    sepal.rotation.x = -a;
-    calyxGroup.add(sepal);
+    sepal.position.set(-maxRadius * 0.06, 0, maxRadius * 0.82);
+    sepal.rotation.y = 0.22; // Hugs curvature of shoulder
+    sepalHolder.add(sepal);
+    calyxGroup.add(sepalHolder);
   }
   group.add(calyxGroup);
 
-  // 3. Curved Woody Stem extending cleanly past calyx
+  // 3. Curved Tapered Woody Pedicel (Stem) with Natural Snapped Tan Cut Tip
   const stemCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(xEnd - 0.02, 0, 0),
-    new THREE.Vector3(xEnd + length * 0.12, -0.03, 0.02),
-    new THREE.Vector3(xEnd + length * 0.24, -0.08, -0.02),
-    new THREE.Vector3(xEnd + length * 0.32, -0.04, 0.01),
+    new THREE.Vector3(shoulderPos.x + 0.01, shoulderPos.y, shoulderPos.z),
+    new THREE.Vector3(
+      shoulderPos.x + length * 0.11,
+      shoulderPos.y - 0.025,
+      shoulderPos.z + 0.02
+    ),
+    new THREE.Vector3(
+      shoulderPos.x + length * 0.24,
+      shoulderPos.y - 0.075,
+      shoulderPos.z - 0.015
+    ),
+    new THREE.Vector3(
+      shoulderPos.x + length * 0.34,
+      shoulderPos.y - 0.04,
+      shoulderPos.z + 0.012
+    ),
   ]);
-  const stemGeo = new THREE.TubeGeometry(stemCurve, 14, maxRadius * 0.13, 8, false);
+  const stemGeo = new THREE.TubeGeometry(
+    stemCurve,
+    16,
+    maxRadius * 0.135,
+    9,
+    false
+  );
+  // Subtle organic thickness flare near calyx & slight woody taper toward tip
+  const sPos = stemGeo.attributes.position;
+  const _cPt = new THREE.Vector3();
+  const _vPt = new THREE.Vector3();
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16;
+    stemCurve.getPoint(t, _cPt);
+    const scale = t < 0.2 ? 1.25 - t * 1.4 : 0.97 - (t - 0.2) * 0.22;
+    for (let j = 0; j <= 9; j++) {
+      const idx = i * 10 + j;
+      _vPt.fromBufferAttribute(sPos, idx).sub(_cPt).multiplyScalar(scale).add(_cPt);
+      sPos.setXYZ(idx, _vPt.x, _vPt.y, _vPt.z);
+    }
+  }
+  sPos.needsUpdate = true;
+  stemGeo.computeVertexNormals();
   disposables.geometries.push(stemGeo);
+
   const stemMesh = new THREE.Mesh(stemGeo, stemMat);
+  stemMesh.castShadow = true;
   group.add(stemMesh);
 
-  // Small woody end cap bulge
-  const stemTipGeo = new THREE.SphereGeometry(maxRadius * 0.16, 8, 8);
+  // Snapped dry woody stem cut end cap
+  const endPt = stemCurve.getPoint(1);
+  const endTan = stemCurve.getTangent(1).normalize();
+  const stemTipGeo = new THREE.CylinderGeometry(
+    maxRadius * 0.11,
+    maxRadius * 0.13,
+    maxRadius * 0.07,
+    8
+  );
   disposables.geometries.push(stemTipGeo);
-  const stemTip = new THREE.Mesh(stemTipGeo, stemMat);
-  stemTip.position.set(xEnd + length * 0.32, -0.04, 0.01);
+  const stemTip = new THREE.Mesh(stemTipGeo, cutTipMat);
+  stemTip.position.copy(endPt);
+  stemTip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), endTan);
   group.add(stemTip);
+
+  // 4. Optional fresh glistening micro-dewdrops on hero chilies
+  if (dewMat) {
+    const p1 = spinePoint(0.54);
+    const p2 = spinePoint(0.32);
+    addWaterDewdrops(
+      group,
+      [
+        {
+          pos: [p1.x, p1.y + maxRadius * 0.62, p1.z + maxRadius * 0.65],
+          radius: 0.022,
+          normal: [0, 0.7, 0.72],
+        },
+        {
+          pos: [p2.x, p2.y + maxRadius * 0.42, p2.z + maxRadius * 0.44],
+          radius: 0.017,
+          normal: [0, 0.68, 0.74],
+        },
+      ],
+      dewMat,
+      disposables
+    );
+  }
 
   return group;
 }
 
 /**
- * Builds an authentic multi-part plump lemon (LatheGeometry with subtle citrus poles)
+ * Builds a photorealistic multi-part Indian Kagzi Lemon:
+ * 1. Asymmetric organic citrus body with smooth surface lobes, polar nipple & top recess
+ * 2. Woody olive-brown pedicel calyx button at top pole
+ * 3. Dried botanical tip scar at bottom pole
+ * 4. 5 tiny glistening condensation water droplets
  */
-function buildOrganicLemon(
+function buildRealisticLemon(
   lemonMat: THREE.Material,
+  calyxButtonMat: THREE.Material,
+  woodyScarMat: THREE.Material,
+  dewMat: THREE.Material,
   disposables: { geometries: THREE.BufferGeometry[] }
-): THREE.Mesh {
+): THREE.Group {
+  const group = new THREE.Group();
+
   const pts: THREE.Vector2[] = [];
-  const segs = 36;
-  const rx = 0.64;
-  const ry = 0.78;
+  const segs = 44;
+  const rx = 0.61;
+  const ry = 0.76;
 
   for (let i = 0; i <= segs; i++) {
     const t = i / segs; // 0 = bottom pole, 1 = top pole
     const angle = t * Math.PI;
-    // Slight citrus pole pinch / nipple at top and bottom
-    const polePinch =
-      Math.exp(-Math.pow((t - 0.06) * 10, 2)) * 0.045 +
-      Math.exp(-Math.pow((t - 0.94) * 10, 2)) * 0.04;
-    const radius = Math.max(0.004, Math.sin(angle) * rx - polePinch * 0.25);
+    // Characteristic citrus nipple pinch at bottom and subtle tapered crown at top
+    const bottomPinch = Math.exp(-Math.pow((t - 0.075) * 11, 2)) * 0.055;
+    const topPinch = Math.exp(-Math.pow((t - 0.93) * 11, 2)) * 0.042;
+    const radius = Math.max(
+      0.005,
+      Math.sin(angle) * rx - (bottomPinch + topPinch) * 0.28
+    );
     let y = -Math.cos(angle) * ry;
-    // Slight organic elongation at poles
-    if (t < 0.08) y -= (0.08 - t) * 0.55;
-    if (t > 0.92) y += (t - 0.92) * 0.45;
+    if (t < 0.09) y -= (0.09 - t) * 0.58;
+    if (t > 0.92) y += (t - 0.92) * 0.42;
     pts.push(new THREE.Vector2(radius, y));
   }
 
-  const lemonGeo = new THREE.LatheGeometry(pts, 44);
+  const lemonGeo = new THREE.LatheGeometry(pts, 52);
+
+  // Organic non-symmetrical fruit sculpting (real lemons are never mathematically perfect!)
+  const pos = lemonGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    const rXZ = Math.sqrt(x * x + z * z);
+    if (rXZ > 0.01) {
+      const theta = Math.atan2(z, x);
+      const ny = y / ry;
+      const env = Math.max(0, 1 - ny * ny * 0.85);
+      // Gentle natural 4-section citrus bulge + subtle organic asymmetry
+      const asym =
+        1 +
+        0.022 * Math.sin(theta * 2 + 0.6) * env +
+        0.015 * Math.cos(theta * 3 - ny * 1.4) * env +
+        0.012 * Math.sin(theta * 5 + ny * 2.2) * env;
+      pos.setXYZ(i, x * asym, y, z * asym);
+    }
+  }
+  pos.needsUpdate = true;
   lemonGeo.computeVertexNormals();
+  lemonGeo.computeTangents();
   disposables.geometries.push(lemonGeo);
 
   const lemonMesh = new THREE.Mesh(lemonGeo, lemonMat);
   lemonMesh.castShadow = true;
   lemonMesh.receiveShadow = true;
-  return lemonMesh;
+  group.add(lemonMesh);
+
+  // Top woody-green pedicel button scar where the lemon grew from the branch
+  const buttonGeo = new THREE.CylinderGeometry(0.085, 0.125, 0.045, 10);
+  disposables.geometries.push(buttonGeo);
+  const topButton = new THREE.Mesh(buttonGeo, calyxButtonMat);
+  topButton.position.set(0, ry + 0.02, 0);
+  group.add(topButton);
+
+  // Scalloped mini calyx ring around top button
+  const miniRingGeo = new THREE.TorusGeometry(0.105, 0.022, 6, 12);
+  miniRingGeo.rotateX(Math.PI / 2);
+  disposables.geometries.push(miniRingGeo);
+  const topRing = new THREE.Mesh(miniRingGeo, calyxButtonMat);
+  topRing.position.set(0, ry + 0.005, 0);
+  group.add(topRing);
+
+  // Tiny dried bottom umbilicus scar right where the black thread exits
+  const bottomScarGeo = new THREE.CylinderGeometry(0.055, 0.04, 0.03, 9);
+  disposables.geometries.push(bottomScarGeo);
+  const bottomScar = new THREE.Mesh(bottomScarGeo, woodyScarMat);
+  bottomScar.position.set(0, -ry - 0.042, 0);
+  group.add(bottomScar);
+
+  // 5 fresh micro water dewdrops clinging naturally to the waxy dimpled skin
+  addWaterDewdrops(
+    group,
+    [
+      { pos: [0.34, 0.28, 0.44], radius: 0.032, normal: [0.55, 0.36, 0.74] },
+      { pos: [0.43, -0.08, 0.41], radius: 0.024, normal: [0.7, -0.1, 0.7] },
+      { pos: [-0.28, 0.35, 0.43], radius: 0.027, normal: [-0.46, 0.45, 0.76] },
+      { pos: [0.16, -0.34, 0.48], radius: 0.022, normal: [0.26, -0.46, 0.85] },
+      { pos: [-0.42, -0.16, 0.38], radius: 0.02, normal: [-0.72, -0.22, 0.65] },
+    ],
+    dewMat,
+    disposables
+  );
+
+  return group;
 }
 
 /**
- * Builds a realistic coiled braided thread knot
+ * Builds a realistic multi-wrap hand-tied braided cotton thread knot
  */
 function buildThreadKnot(
   scale: number,
@@ -410,22 +947,59 @@ function buildThreadKnot(
   disposables: { geometries: THREE.BufferGeometry[] }
 ): THREE.Group {
   const knotGroup = new THREE.Group();
-  const torusGeo = new THREE.TorusGeometry(0.11 * scale, 0.042 * scale, 10, 20);
+  const torusGeo = new THREE.TorusGeometry(0.095 * scale, 0.036 * scale, 10, 22);
   disposables.geometries.push(torusGeo);
 
   const loopA = new THREE.Mesh(torusGeo, threadMat);
-  loopA.rotation.set(0.7, 0.3, 0.2);
+  loopA.rotation.set(0.75, 0.35, 0.22);
 
   const loopB = new THREE.Mesh(torusGeo, threadMat);
-  loopB.rotation.set(-0.6, 1.1, 0.6);
-  loopB.position.set(0.02 * scale, -0.03 * scale, 0.01 * scale);
+  loopB.rotation.set(-0.65, 1.15, 0.58);
+  loopB.position.set(0.018 * scale, -0.026 * scale, 0.01 * scale);
 
   const loopC = new THREE.Mesh(torusGeo, threadMat);
-  loopC.rotation.set(1.2, -0.5, 0.9);
-  loopC.position.set(-0.02 * scale, 0.02 * scale, -0.01 * scale);
+  loopC.rotation.set(1.22, -0.52, 0.88);
+  loopC.position.set(-0.018 * scale, 0.022 * scale, -0.01 * scale);
 
-  knotGroup.add(loopA, loopB, loopC);
+  const collarGeo = new THREE.TorusGeometry(0.062 * scale, 0.028 * scale, 8, 18);
+  collarGeo.rotateX(Math.PI / 2);
+  disposables.geometries.push(collarGeo);
+  const collar = new THREE.Mesh(collarGeo, threadMat);
+  collar.position.set(0, -0.055 * scale, 0);
+
+  knotGroup.add(loopA, loopB, loopC, collar);
   return knotGroup;
+}
+
+/**
+ * Builds realistic splayed frayed cotton tassel strands below the bottom knot
+ */
+function buildFrayedTassel(
+  threadMat: THREE.Material,
+  disposables: { geometries: THREE.BufferGeometry[] }
+): THREE.Group {
+  const tassel = new THREE.Group();
+  const strandDefs = [
+    { dx: -0.055, dz: 0.035, len: 0.32, r: 0.012 },
+    { dx: 0.048, dz: 0.042, len: 0.36, r: 0.011 },
+    { dx: -0.024, dz: -0.052, len: 0.29, r: 0.01 },
+    { dx: 0.062, dz: -0.028, len: 0.26, r: 0.0095 },
+    { dx: 0.008, dz: 0.015, len: 0.38, r: 0.012 },
+  ];
+
+  for (const s of strandDefs) {
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(s.dx * 0.35, -s.len * 0.42, s.dz * 0.35),
+      new THREE.Vector3(s.dx * 0.85, -s.len * 0.78, s.dz * 0.85),
+      new THREE.Vector3(s.dx * 1.15, -s.len, s.dz * 1.15),
+    ]);
+    const geo = new THREE.TubeGeometry(curve, 10, s.r, 6, false);
+    disposables.geometries.push(geo);
+    const mesh = new THREE.Mesh(geo, threadMat);
+    tassel.add(mesh);
+  }
+  return tassel;
 }
 
 export function NimbuMirchi3D() {
@@ -466,7 +1040,7 @@ export function NimbuMirchi3D() {
     );
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.96;
+    renderer.toneMappingExposure = 1.02;
     renderer.shadowMap.enabled = !isSoftwareGl;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setClearColor(0x000000, 0);
@@ -479,37 +1053,63 @@ export function NimbuMirchi3D() {
 
     const scene = new THREE.Scene();
 
-    // Procedural Studio Environment Map (restrained intensity so rich botanical colors never bleach out)
+    // Procedural Studio Environment Map (always generated for crisp dielectric reflections)
     const pmrem = new THREE.PMREMGenerator(renderer);
     const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environment = envTexture;
     pmrem.dispose();
 
-    const camera = new THREE.PerspectiveCamera(34, width / height, 0.1, 40);
-    camera.position.set(0, 0.05, 8.4);
-    camera.lookAt(0, 0.05, 0);
+    const camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 40);
+    camera.position.set(0, 0.15, 8.5);
+    camera.lookAt(0, 0.15, 0);
 
-    // Sculpted High-Contrast Studio Lighting Rig (keeps yellows vivid & greens lush)
-    const hemiLight = new THREE.HemisphereLight(0xdbe8ff, 0x0e1018, 0.36);
+    // =========================================================================
+    // MACRO STUDIO PHOTOGRAPHY LIGHTING RIG (Warm Key + Cool Fill + Softboxes + Rim)
+    // =========================================================================
+    const hemiLight = new THREE.HemisphereLight(0xd4e5ff, 0x16120c, 0.44);
     scene.add(hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(0xfff5e0, 1.85);
-    keyLight.position.set(3.8, 5.2, 6.2);
+    const keyLight = new THREE.DirectionalLight(0xfff4df, 2.05);
+    keyLight.position.set(3.6, 5.1, 5.4);
     if (!isSoftwareGl) {
       keyLight.castShadow = true;
-      keyLight.shadow.mapSize.set(1024, 1024);
-      keyLight.shadow.bias = -0.0005;
-      keyLight.shadow.normalBias = 0.02;
+      keyLight.shadow.mapSize.set(2048, 2048);
+      keyLight.shadow.camera.near = 1;
+      keyLight.shadow.camera.far = 16;
+      const d = 3.4;
+      keyLight.shadow.camera.left = -d;
+      keyLight.shadow.camera.right = d;
+      keyLight.shadow.camera.top = d;
+      keyLight.shadow.camera.bottom = -d;
+      keyLight.shadow.bias = -0.0004;
+      keyLight.shadow.normalBias = 0.018;
+      keyLight.shadow.radius = 3.5;
     }
     scene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight(0x9cbcff, 0.3);
-    fillLight.position.set(-4.5, 1.2, 3.8);
+    // Cool opposite bounce fill for rich shadow depth
+    const fillLight = new THREE.DirectionalLight(0x98baff, 0.34);
+    fillLight.position.set(-4.6, 0.8, 3.6);
     scene.add(fillLight);
 
-    const rimLight = new THREE.PointLight(0xffffff, 4.4, 18, 1.7);
-    rimLight.position.set(-2.5, 3.2, -3.5);
+    // Warm crisp studio rim backlight to sculpt translucent green tips & lemon edges
+    const rimLight = new THREE.PointLight(0xfff6e3, 6.2, 16, 1.6);
+    rimLight.position.set(-2.4, 3.1, -3.4);
     scene.add(rimLight);
+
+    // Secondary softbox specular highlights across glossy waxy skins (GPU only)
+    if (!isSoftwareGl) {
+      RectAreaLightUniformsLib.init();
+      const softboxKey = new THREE.RectAreaLight(0xfff8eb, 2.6, 2.8, 4.2);
+      softboxKey.position.set(3.4, 2.2, 4.2);
+      softboxKey.lookAt(0, 0.1, 0);
+      scene.add(softboxKey);
+
+      const softboxRim = new THREE.RectAreaLight(0xdce8ff, 1.5, 2.0, 3.8);
+      softboxRim.position.set(-3.6, 1.4, 2.8);
+      softboxRim.lookAt(0, 0.0, 0);
+      scene.add(softboxRim);
+    }
 
     const disposables: {
       geometries: THREE.BufferGeometry[];
@@ -519,91 +1119,161 @@ export function NimbuMirchi3D() {
 
     const maxAniso = renderer.capabilities.getMaxAnisotropy();
 
-    // Rich, Vivid, Saturated Organic Botanical PBR Textures
-    const lemonTex = createLemonTextures(maxAniso);
-    const threadTex = createBraidedThreadTextures(maxAniso);
-    const chiliTex1 = createChiliTexture('#1c9918', '#42c422', '#0d570c', maxAniso);
-    const chiliTex2 = createChiliTexture('#0a7e12', '#1fa61c', '#064709', maxAniso);
-    const chiliTex3 = createChiliTexture('#229c19', '#49c724', '#0f5e0c', maxAniso);
-    const chiliTex4 = createChiliTexture('#127a15', '#2ca620', '#08450a', maxAniso);
+    // =========================================================================
+    // PROCEDURAL BOTANICAL PBR TEXTURES & MATERIALS
+    // =========================================================================
+    const lemonMaps = createLemonPBRMaps(maxAniso);
+    const threadMaps = createBraidedThreadPBRMaps(maxAniso);
 
-    disposables.textures.push(
-      lemonTex.map,
-      lemonTex.bumpMap,
-      threadTex.map,
-      threadTex.bumpMap,
-      chiliTex1,
-      chiliTex2,
-      chiliTex3,
-      chiliTex4
+    // 7 distinct natural market-fresh Indian green chili color/normal/roughness variants
+    const chiliPalettes: Array<[string, string, string, number]> = [
+      ['#157c14', '#39ad1f', '#0a4a09', 1103],
+      ['#0e6b11', '#279619', '#073c08', 2207],
+      ['#1e8a16', '#46b822', '#0d500a', 3313],
+      ['#127313', '#2fa11b', '#084109', 4421],
+      ['#198215', '#3eb020', '#0b4b0a', 5527],
+      ['#0d6610', '#238f17', '#063808', 6637],
+      ['#1b8716', '#42b421', '#0c4e09', 7741],
+    ];
+
+    const chiliMapsList = chiliPalettes.map(([base, hi, tip, seed]) =>
+      createChiliPBRMaps(base, hi, tip, seed, maxAniso)
     );
 
-    // PBR Materials with controlled envMapIntensity so pigments stay vibrant and juicy
-    const threadMat = new THREE.MeshStandardMaterial({
-      map: threadTex.map,
-      bumpMap: threadTex.bumpMap,
-      bumpScale: 0.04,
-      color: 0x22252e,
-      roughness: 0.92,
-      metalness: 0.02,
+    disposables.textures.push(
+      lemonMaps.map,
+      lemonMaps.normalMap,
+      lemonMaps.roughnessMap,
+      threadMaps.map,
+      threadMaps.normalMap
+    );
+    chiliMapsList.forEach((m) =>
+      disposables.textures.push(m.map, m.normalMap, m.roughnessMap)
+    );
+
+    // Cotton braided thread with fibrous velvet sheen
+    const threadMat = new THREE.MeshPhysicalMaterial({
+      map: threadMaps.map,
+      normalMap: threadMaps.normalMap,
+      normalScale: new THREE.Vector2(1.15, 1.15),
+      color: 0x20232b,
+      roughness: 0.94,
+      metalness: 0.0,
+      sheen: 0.72,
+      sheenRoughness: 0.84,
+      sheenColor: new THREE.Color(0x6c7484),
       envMapIntensity: 0.25,
     });
 
+    // Matte fibrous olive-green calyx & woody stem (high roughness contrast vs glossy chili body)
     const calyxMat = new THREE.MeshStandardMaterial({
-      color: 0x245616,
-      roughness: 0.72,
-      metalness: 0.02,
-      envMapIntensity: 0.22,
+      color: 0x2f5a18,
+      roughness: 0.84,
+      metalness: 0.0,
+      envMapIntensity: 0.24,
     });
 
     const stemMat = new THREE.MeshStandardMaterial({
-      color: 0x2d611b,
-      roughness: 0.76,
-      metalness: 0.02,
-      envMapIntensity: 0.22,
+      color: 0x3b661e,
+      roughness: 0.82,
+      metalness: 0.0,
+      envMapIntensity: 0.24,
     });
 
-    const chiliMats = [chiliTex1, chiliTex2, chiliTex3, chiliTex4].map(
-      (tex) =>
-        new THREE.MeshPhysicalMaterial({
-          map: tex,
-          roughness: 0.26,
-          metalness: 0.0,
-          clearcoat: 0.65,
-          clearcoatRoughness: 0.18,
-          envMapIntensity: 0.28,
-        })
-    );
-
-    const lemonMat = new THREE.MeshPhysicalMaterial({
-      map: lemonTex.map,
-      bumpMap: lemonTex.bumpMap,
-      bumpScale: 0.032,
-      roughness: 0.42,
+    const cutTipMat = new THREE.MeshStandardMaterial({
+      color: 0x87764b,
+      roughness: 0.94,
       metalness: 0.0,
-      clearcoat: 0.22,
-      clearcoatRoughness: 0.45,
+      envMapIntensity: 0.18,
+    });
+
+    const lemonCalyxButtonMat = new THREE.MeshStandardMaterial({
+      color: 0x4c5821,
+      roughness: 0.88,
+      metalness: 0.0,
       envMapIntensity: 0.2,
     });
 
-    disposables.materials.push(threadMat, calyxMat, stemMat, lemonMat, ...chiliMats);
+    const lemonScarMat = new THREE.MeshStandardMaterial({
+      color: 0x5c4824,
+      roughness: 0.92,
+      metalness: 0.0,
+      envMapIntensity: 0.18,
+    });
+
+    // Fresh glistening condensation water droplets
+    const dewMat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      roughness: 0.03,
+      metalness: 0.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.02,
+      ior: 1.33,
+      reflectivity: 0.9,
+      transparent: true,
+      opacity: 0.68,
+      envMapIntensity: 1.5,
+      depthWrite: false,
+    });
+
+    // Glossy waxy Indian green chili PBR materials + warm-emerald backlit SSS
+    const chiliMats = chiliMapsList.map((maps) => {
+      const mat = new THREE.MeshPhysicalMaterial({
+        map: maps.map,
+        normalMap: maps.normalMap,
+        normalScale: new THREE.Vector2(0.85, 0.85),
+        roughnessMap: maps.roughnessMap,
+        roughness: 1.0,
+        metalness: 0.0,
+        clearcoat: 0.88,
+        clearcoatRoughness: 0.13,
+        specularIntensity: 0.9,
+        envMapIntensity: 0.38,
+      });
+      applyBotanicalSubsurface(mat, 0x5be022, 0.24);
+      return mat;
+    });
+
+    // Dimpled waxy sun-ripe lemon PBR material + warm golden-amber backlit SSS
+    const lemonMat = new THREE.MeshPhysicalMaterial({
+      map: lemonMaps.map,
+      normalMap: lemonMaps.normalMap,
+      normalScale: new THREE.Vector2(1.15, 1.15),
+      roughnessMap: lemonMaps.roughnessMap,
+      roughness: 1.0,
+      metalness: 0.0,
+      clearcoat: 0.42,
+      clearcoatRoughness: 0.26,
+      specularIntensity: 0.72,
+      envMapIntensity: 0.34,
+    });
+    applyBotanicalSubsurface(lemonMat, 0xffaa00, 0.32);
+
+    disposables.materials.push(
+      threadMat,
+      calyxMat,
+      stemMat,
+      cutTipMat,
+      lemonCalyxButtonMat,
+      lemonScarMat,
+      dewMat,
+      lemonMat,
+      ...chiliMats
+    );
 
     // =========================================================================
-    // COUPLED PENDULUM CHAIN HIERARCHY (Authentic Reference Proportions)
-    // Anchor at top edge (y = +2.85) dropping cleanly through 4 chilies -> lemon -> bottom knot
+    // AUTHENTIC 7-CHILI + 1-LEMON COUPLED PENDULUM CHAIN HIERARCHY
+    // Anchor at top edge (y = +2.98) -> 7 alternating fresh green chilies -> plump lemon -> knot + frayed tassel
     // =========================================================================
-    const ANCHOR_Y = 2.85;
+    const ANCHOR_Y = 2.98;
 
-    // 7 Chain Physics Nodes:
+    // 10 Physics Nodes:
     // 0: Ceiling Anchor (pinned)
-    // 1: Top Knot + Chili 1 (Top long chili)
-    // 2: Chili 2 (Plump vibrant green chili)
-    // 3: Chili 3 (Medium tilted chili)
-    // 4: Chili 4 (Foreshortened front-pointing chili above lemon)
-    // 5: Lemon Center (Heavy bob)
-    // 6: Bottom Knot & Frayed Tail
-    const restLengths = [1.38, 0.56, 0.5, 0.42, 0.92, 1.12];
-    const nodeMasses = [0, 1.0, 1.05, 0.95, 0.9, 2.2, 0.4];
+    // 1..7: 7 Traditional Stacked Indian Green Chilies
+    // 8: Plump Sun-Ripe Kagzi Lemon (Heavy bob)
+    // 9: Bottom Knot + Frayed Cotton Tassel Tail
+    const restLengths = [0.98, 0.28, 0.27, 0.27, 0.26, 0.26, 0.26, 0.95, 0.62];
+    const nodeMasses = [0, 0.85, 0.9, 0.9, 0.88, 0.88, 0.85, 0.85, 2.75, 0.32];
 
     interface ChainNode {
       pos: THREE.Vector3;
@@ -622,10 +1292,10 @@ export function NimbuMirchi3D() {
       });
     }
 
-    // Dynamic Rope Mesh (smooth cylindrical tube updated along chain points)
-    const ropeSegments = 28;
+    // Dynamic Multi-Ply Braided Thread Mesh updated in-place along CatmullRomCurve3
+    const ropeSegments = 36;
     const ropeRadial = 8;
-    const ropeRadius = 0.036;
+    const ropeRadius = 0.03;
     const ropeGeo = new THREE.CylinderGeometry(
       ropeRadius,
       ropeRadius,
@@ -636,10 +1306,10 @@ export function NimbuMirchi3D() {
     );
     disposables.geometries.push(ropeGeo);
     const ropeMesh = new THREE.Mesh(ropeGeo, threadMat);
+    ropeMesh.castShadow = true;
     ropeMesh.frustumCulled = false;
     scene.add(ropeMesh);
 
-    // Helper to update rope geometry vertices in-place along CatmullRomCurve3 (no geometry rebuild!)
     const ropeCurve = new THREE.CatmullRomCurve3(_ropeCurvePts);
     const _pt = new THREE.Vector3();
     const _tan = new THREE.Vector3();
@@ -667,8 +1337,7 @@ export function NimbuMirchi3D() {
         }
         _binorm.crossVectors(_tan, _norm).normalize();
 
-        // Slightly taper the frayed tail at very bottom
-        const r = t > 0.94 ? ropeRadius * (1 - (t - 0.94) * 9) : ropeRadius;
+        const r = t > 0.92 ? ropeRadius * (1 - (t - 0.92) * 7.5) : ropeRadius;
 
         for (let j = 0; j <= ropeRadial; j++) {
           const theta = (j / ropeRadial) * Math.PI * 2;
@@ -687,27 +1356,33 @@ export function NimbuMirchi3D() {
       ropeGeo.computeVertexNormals();
     };
 
-    // Assemble Top Knot
-    const topKnot = buildThreadKnot(1.05, threadMat, disposables);
+    // Hand-tied Top Knot right above Chili 1
+    const topKnot = buildThreadKnot(1.0, threadMat, disposables);
     scene.add(topKnot);
 
-    // Assemble 4 Distinctive Plump Organic Chilies matching the Reference Silhouette
+    // Assemble 7 Natural Alternating Indian Green Chilies (organic criss-cross spiral)
     const chiliSpecs = [
-      { length: 2.12, radius: 0.27, bend: 0.18, baseYaw: 0.04, baseRoll: -0.07, basePitch: 0.04, offsetX: -0.04 },
-      { length: 2.02, radius: 0.3, bend: 0.15, baseYaw: -0.1, baseRoll: -0.04, basePitch: -0.04, offsetX: 0.03 },
-      { length: 1.54, radius: 0.26, bend: 0.13, baseYaw: 0.24, baseRoll: 0.01, basePitch: 0.08, offsetX: -0.02 },
-      { length: 1.28, radius: 0.25, bend: 0.11, baseYaw: 1.38, baseRoll: 0.1, basePitch: 0.16, offsetX: -0.02 },
+      { length: 1.98, radius: 0.195, bend: 0.2, sCurve: 0.04, baseYaw: 0.12, baseRoll: -0.07, basePitch: 0.04, offsetX: -0.04, dew: true },
+      { length: 1.88, radius: 0.21, bend: 0.17, sCurve: -0.035, baseYaw: Math.PI - 0.22, baseRoll: 0.05, basePitch: -0.03, offsetX: 0.04, dew: false },
+      { length: 1.76, radius: 0.19, bend: 0.18, sCurve: 0.045, baseYaw: -0.32, baseRoll: -0.05, basePitch: 0.06, offsetX: -0.02, dew: true },
+      { length: 1.84, radius: 0.205, bend: 0.16, sCurve: -0.04, baseYaw: Math.PI + 0.34, baseRoll: 0.06, basePitch: -0.04, offsetX: 0.03, dew: false },
+      { length: 1.66, radius: 0.185, bend: 0.15, sCurve: 0.035, baseYaw: 0.56, baseRoll: -0.04, basePitch: 0.05, offsetX: -0.02, dew: false },
+      { length: 1.58, radius: 0.195, bend: 0.14, sCurve: -0.03, baseYaw: -Math.PI + 0.58, baseRoll: 0.04, basePitch: -0.06, offsetX: 0.02, dew: false },
+      { length: 1.44, radius: 0.185, bend: 0.13, sCurve: 0.03, baseYaw: 1.18, baseRoll: 0.07, basePitch: 0.12, offsetX: -0.01, dew: true },
     ];
 
     const chiliAnchors: THREE.Group[] = chiliSpecs.map((spec, idx) => {
       const holder = new THREE.Group();
-      const chili = buildOrganicChili(
+      const chili = buildRealisticChili(
         spec.length,
         spec.radius,
         spec.bend,
+        spec.sCurve,
         chiliMats[idx],
         calyxMat,
         stemMat,
+        cutTipMat,
+        spec.dew ? dewMat : null,
         disposables
       );
       chili.position.x = spec.offsetX;
@@ -717,23 +1392,34 @@ export function NimbuMirchi3D() {
       return holder;
     });
 
-    // Assemble Plump Dimpled Yellow Lemon with Bottom Knot permanently locked to its base pole
+    // Assemble Photorealistic Lemon + Permanently Anchored Bottom Knot + Frayed Cotton Tassel
     const lemonHolder = new THREE.Group();
-    const lemonMesh = buildOrganicLemon(lemonMat, disposables);
-    lemonHolder.add(lemonMesh);
+    const lemonGroup = buildRealisticLemon(
+      lemonMat,
+      lemonCalyxButtonMat,
+      lemonScarMat,
+      dewMat,
+      disposables
+    );
+    lemonHolder.add(lemonGroup);
 
-    const bottomKnot = buildThreadKnot(0.95, threadMat, disposables);
+    const bottomKnot = buildThreadKnot(0.92, threadMat, disposables);
     bottomKnot.position.set(0, -0.82, 0);
     lemonHolder.add(bottomKnot);
+
+    const tassel = buildFrayedTassel(threadMat, disposables);
+    tassel.position.set(0, -0.88, 0);
+    lemonHolder.add(tassel);
+
     scene.add(lemonHolder);
 
-    // Generous Invisible Collision Proxy for Effortless Grabbing & Hover Detection
-    const hitProxyGeo = new THREE.CylinderGeometry(1.15, 0.95, 4.4, 12);
+    // Generous Invisible Collision Proxy for Effortless Grabbing & Hover Breeze
+    const hitProxyGeo = new THREE.CylinderGeometry(1.15, 0.95, 4.7, 12);
     const hitProxyMat = new THREE.MeshBasicMaterial({ visible: false });
     disposables.geometries.push(hitProxyGeo);
     disposables.materials.push(hitProxyMat);
     const hitProxy = new THREE.Mesh(hitProxyGeo, hitProxyMat);
-    hitProxy.position.set(0, -0.55, 0);
+    hitProxy.position.set(0, -0.35, 0);
     scene.add(hitProxy);
 
     if (!isSoftwareGl) {
@@ -745,30 +1431,29 @@ export function NimbuMirchi3D() {
     // =========================================================================
     let dragging = false;
     let activePointerId: number | null = null;
-    let grabbedNodeIndex = 5; // Default lemon bob
+    let grabbedNodeIndex = 8; // Default lemon bob
     const dragTarget = new THREE.Vector3();
     const lastDragWorld = new THREE.Vector3();
     const pointerVelocity = new THREE.Vector3();
     let lastPointerTime = performance.now();
 
     let twistAngle = 0;
-    let twistVelocity = prefersReducedMotion ? 0 : 0.45;
+    let twistVelocity = prefersReducedMotion ? 0 : 0.42;
     let lastHoverX = 0;
     let wasHoveringMesh = false;
 
     const applyImpulse = (vx: number, vz: number, spin: number) => {
       for (let i = 1; i < chain.length; i++) {
         const weight = i / (chain.length - 1);
-        chain[i].prev.x -= vx * weight * 0.085;
-        chain[i].prev.z -= vz * weight * 0.065;
+        chain[i].prev.x -= vx * weight * 0.08;
+        chain[i].prev.z -= vz * weight * 0.06;
       }
       twistVelocity = THREE.MathUtils.clamp(twistVelocity + spin, -7, 7);
     };
     impulseRef.current = applyImpulse;
 
-    // Give a gentle welcoming sway on mount (unless reduced motion)
     if (!prefersReducedMotion) {
-      applyImpulse(0.95, 0.25, 0.6);
+      applyImpulse(0.9, 0.25, 0.55);
     }
 
     const updateMouseNDC = (clientX: number, clientY: number) => {
@@ -789,10 +1474,9 @@ export function NimbuMirchi3D() {
         renderer.domElement.setPointerCapture(e.pointerId);
 
         const hitPoint = hits[0].point;
-        // Pick closest movable chain node (between Chili 1 and Lemon)
-        let bestIdx = 5;
+        let bestIdx = 8;
         let bestDist = Infinity;
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= 8; i++) {
           const d = Math.abs(chain[i].pos.y - hitPoint.y);
           if (d < bestDist) {
             bestDist = d;
@@ -822,12 +1506,10 @@ export function NimbuMirchi3D() {
             .divideScalar(dt)
             .clampLength(0, 18);
 
-          // Clamp max drag stretch cleanly so it swings freely across the full footer stage
           dragTarget.copy(_intersectPt);
           dragTarget.x = THREE.MathUtils.clamp(dragTarget.x, -4.4, 4.4);
-          dragTarget.y = THREE.MathUtils.clamp(dragTarget.y, -2.2, 2.2);
+          dragTarget.y = THREE.MathUtils.clamp(dragTarget.y, -2.2, 2.3);
 
-          // Gentle rotational twist coupled to horizontal drag
           twistVelocity += pointerVelocity.x * 0.012;
 
           lastDragWorld.copy(_intersectPt);
@@ -836,7 +1518,6 @@ export function NimbuMirchi3D() {
         return;
       }
 
-      // Hover detection + subtle playful brush breeze when swiping across it
       const hits = _raycaster.intersectObject(hitProxy, false);
       const hovering = hits.length > 0;
       if (hovering !== wasHoveringMesh) {
@@ -847,7 +1528,7 @@ export function NimbuMirchi3D() {
         const dx = e.clientX - lastHoverX;
         lastHoverX = e.clientX;
         if (Math.abs(dx) > 3) {
-          const nudge = THREE.MathUtils.clamp(dx * 0.025, -0.85, 0.85);
+          const nudge = THREE.MathUtils.clamp(dx * 0.024, -0.85, 0.85);
           applyImpulse(nudge, -Math.abs(nudge) * 0.2, nudge * 0.35);
         }
       }
@@ -862,7 +1543,6 @@ export function NimbuMirchi3D() {
         renderer.domElement.releasePointerCapture(e.pointerId);
       }
 
-      // If it was a crisp tap/click with minimal movement, give a fun playful poke!
       if (pointerVelocity.length() < 0.7) {
         const dir = dragTarget.x >= 0 ? -1 : 1;
         applyImpulse(dir * 2.1, 0.55, dir * 2.2);
@@ -880,7 +1560,6 @@ export function NimbuMirchi3D() {
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
 
-    // Pause animation when scrolled away from footer
     let isVisible = true;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -905,11 +1584,10 @@ export function NimbuMirchi3D() {
     const stepPhysics = (dt: number, elapsed: number) => {
       const subSteps = 4;
       const subDt = Math.min(dt, 0.033) / subSteps;
-      const gravity = -18.5;
+      const gravity = -19.2;
       const damping = 0.992;
 
       for (let step = 0; step < subSteps; step++) {
-        // Verlet integration on movable nodes
         for (let i = 1; i < chain.length; i++) {
           const node = chain[i];
           const vx = (node.pos.x - node.prev.x) * damping;
@@ -918,26 +1596,24 @@ export function NimbuMirchi3D() {
 
           node.prev.copy(node.pos);
 
-          // Whisper-quiet ambient air draft when idle
           const breeze =
             !dragging && !prefersReducedMotion
-              ? Math.sin(elapsed * 1.15 + i * 0.45) * 0.24
+              ? Math.sin(elapsed * 1.1 + i * 0.32) * 0.22
               : 0;
 
           node.pos.x += vx + breeze * subDt * subDt;
           node.pos.y += vy + gravity * subDt * subDt;
-          node.pos.z += vz + Math.cos(elapsed * 0.85 + i) * 0.1 * subDt * subDt;
+          node.pos.z += vz + Math.cos(elapsed * 0.8 + i * 0.4) * 0.09 * subDt * subDt;
         }
 
-        // Apply active pointer drag pull cleanly
         if (dragging) {
           const grabbed = chain[grabbedNodeIndex];
           grabbed.pos.lerp(dragTarget, 0.45);
           grabbed.prev.lerp(dragTarget, 0.35);
         }
 
-        // Distance constraints along the thread (5 solver iterations for crisp tautness)
-        for (let iter = 0; iter < 5; iter++) {
+        // 6 constraint iterations for taut natural cotton cord hang
+        for (let iter = 0; iter < 6; iter++) {
           chain[0].pos.set(0, ANCHOR_Y, 0);
 
           for (let i = 0; i < restLengths.length; i++) {
@@ -963,26 +1639,25 @@ export function NimbuMirchi3D() {
       }
 
       // Torsional rotational twist spring around vertical axis
-      const twistSpring = -2.6 * twistAngle - 1.35 * twistVelocity;
+      const twistSpring = -2.5 * twistAngle - 1.3 * twistVelocity;
       twistVelocity += twistSpring * Math.min(dt, 0.033);
       twistAngle += twistVelocity * Math.min(dt, 0.033);
 
-      // Keep bottom tail node cleanly trailing below the lemon axis (never flips above lemon)
-      _vDir.subVectors(chain[5].pos, chain[4].pos).normalize();
-      chain[6].pos.lerp(
-        _pt.copy(chain[5].pos).addScaledVector(_vDir, restLengths[5]),
+      // Keep bottom tail node cleanly trailing below the lemon axis
+      _vDir.subVectors(chain[8].pos, chain[7].pos).normalize();
+      chain[9].pos.lerp(
+        _pt.copy(chain[8].pos).addScaledVector(_vDir, restLengths[8]),
         0.55
       );
 
-      // Update Rope & All Attached 3D Props
       updateRopeGeometry();
 
       // Top Knot locked accurately along rope tangent just above Chili 1
       _vDir.subVectors(chain[0].pos, chain[1].pos).normalize();
-      topKnot.position.copy(chain[1].pos).addScaledVector(_vDir, 0.28);
-      topKnot.rotation.y = twistAngle * 0.5;
+      topKnot.position.copy(chain[1].pos).addScaledVector(_vDir, 0.22);
+      topKnot.rotation.y = twistAngle * 0.45;
 
-      // Orient each chili cleanly perpendicular to its local thread tangent + torsional spin
+      // Orient each of the 7 chilies cleanly perpendicular to local thread tangent + torsional spin
       for (let c = 0; c < chiliAnchors.length; c++) {
         const nodeIdx = c + 1;
         const holder = chiliAnchors[c];
@@ -991,25 +1666,23 @@ export function NimbuMirchi3D() {
         _vDir.subVectors(chain[nodeIdx + 1].pos, chain[nodeIdx - 1].pos).normalize();
         _quat.setFromUnitVectors(_vUp, _vDir);
         holder.quaternion.copy(_quat);
-        holder.rotateY(twistAngle * (0.65 + c * 0.14));
+        holder.rotateY(twistAngle * (0.55 + c * 0.08));
       }
 
-      // Lemon Bob (with permanently anchored Bottom Knot) aligned to lower rope tangent
-      lemonHolder.position.copy(chain[5].pos);
-      _vDir.subVectors(chain[5].pos, chain[4].pos).normalize();
+      // Lemon Bob (with anchored Bottom Knot & Frayed Tassel) aligned to lower rope tangent
+      lemonHolder.position.copy(chain[8].pos);
+      _vDir.subVectors(chain[8].pos, chain[7].pos).normalize();
       _quat.setFromUnitVectors(_vUp, _vDir);
       lemonHolder.quaternion.copy(_quat);
       lemonHolder.rotateY(twistAngle * 1.15);
 
-      // Keep collision proxy synced with the moving chain center
       hitProxy.position.set(
-        (chain[2].pos.x + chain[5].pos.x) * 0.5,
-        (chain[1].pos.y + chain[5].pos.y) * 0.5,
-        (chain[2].pos.z + chain[5].pos.z) * 0.5
+        (chain[3].pos.x + chain[8].pos.x) * 0.5,
+        (chain[1].pos.y + chain[8].pos.y) * 0.5,
+        (chain[3].pos.z + chain[8].pos.z) * 0.5
       );
     };
 
-    // Initial render frame
     stepPhysics(0.016, 0);
     renderer.render(scene, camera);
 

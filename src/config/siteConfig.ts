@@ -65,17 +65,26 @@ export interface PhilosophyPillar {
   body: string;
 }
 
+export type UpdateCategoryId = 'all' | 'platform' | 'education' | 'creative';
+
 export interface EcosystemUpdate {
   id: string;
   index: string;
+  category: Exclude<UpdateCategoryId, 'all'>;
   tag: string;
   statusLabel: string;
+  stageLabel: string;
+  domainLabel: string;
   title: string;
   summary: string;
   detail: string;
+  highlights: string[];
   accentColor: string;
+  image: string;
+  imageAlt: string;
   href: string;
   targetTab?: AppTabId;
+  scrollToId?: string;
   ctaLabel: string;
   external?: boolean;
 }
@@ -169,75 +178,157 @@ export const ECOSYSTEM_UPDATES: EcosystemUpdate[] = [
   {
     id: 'update-pwa-app',
     index: '01',
+    category: 'platform',
     tag: 'Platform Release',
     statusLabel: 'Live Now',
+    stageLabel: 'Core Portal',
+    domainLabel: 'Installable PWA · Multi-Screen App',
     title: 'Installable Web App & Multi-Screen Mode',
     summary:
-      'The ecosystem portal now runs as an installable Progressive Web App with dedicated app screens, offline resilience, and native-style bottom navigation.',
+      'The ecosystem portal now runs as an installable Progressive Web App with dedicated app screens, offline asset caching, and native-style bottom navigation.',
     detail:
-      'Install directly to your phone or desktop home screen for instant full-screen access across all live projects, updates, planned explorations, and founder dispatches.',
+      'Install directly to your phone or desktop home screen for instant full-screen access across all live projects, interactive previews, planned explorations, and founder dispatches.',
+    highlights: [
+      'Dedicated multi-screen app flow with bottom dock navigation',
+      'Offline-ready service worker caching & home-screen installation',
+      'Interactive live iframe previews with desktop & mobile viewports',
+    ],
     accentColor: '#4F7DF3',
+    image: '/src/assets/images/philosophy_observatory_1795677181167.jpg',
+    imageAlt:
+      'Minimalist dark basalt and glass horizon observatory gallery reflecting twilight water',
     href: '#ecosystem',
     targetTab: 'ecosystem',
     ctaLabel: 'Open Live Sites',
     external: false,
   },
   {
-    id: 'update-jee-tapasya',
+    id: 'update-craft-themes-legal',
     index: '02',
+    category: 'platform',
+    tag: 'Experience Upgrade',
+    statusLabel: 'Recently Shipped',
+    stageLabel: 'UI & Craft',
+    domainLabel: 'Themes · 3D Physics · Trust Center',
+    title: 'Color Atmospheres, Photorealistic 3D & Trust Center',
+    summary:
+      'Introduced four curated light and dark color atmospheres, a botanical 3D Nimbu Mirchi with pendulum physics, and a full-screen Legal & Trust Center.',
+    detail:
+      'Every screen adapts seamlessly between Obsidian Dark, Glacier Sky, Daylight Ivory, and Soft Blossom while keeping interactive 3D stages crisp and responsive.',
+    highlights: [
+      '4 Color Atmospheres saved privately in browser storage',
+      'Photorealistic 7-chili & lemon 3D Nimbu Mirchi across every screen',
+      'Full-screen Legal & Trust Center with copy & print-ready views',
+    ],
+    accentColor: '#8B5CF6',
+    image: '/src/assets/images/ecosystem_yashraj_jadhav_1795677178110.jpg',
+    imageAlt:
+      'Brushed titanium frame holding a faceted smoked indigo glass prism on a basalt plinth',
+    href: '#legal',
+    targetTab: 'legal',
+    ctaLabel: 'Explore Trust Center',
+    external: false,
+  },
+  {
+    id: 'update-jee-tapasya',
+    index: '03',
+    category: 'education',
     tag: 'Education Live',
     statusLabel: 'Active Project',
+    stageLabel: 'Student Platform',
+    domainLabel: 'jeetapasya.vercel.app',
     title: 'JEE TAPASYA — Focused Exam Preparation',
     summary:
       'Independent educational platform live on the web, dedicated to disciplined JEE preparation and structured study workflows.',
     detail:
-      'Hosted at jeetapasya.vercel.app as part of the learning branch of our growing ecosystem.',
+      'Hosted at jeetapasya.vercel.app as part of the learning branch of our growing ecosystem, designed to eliminate distraction during intensive study sessions.',
+    highlights: [
+      'Purpose-built around disciplined daily engineering entrance prep',
+      'Clean, distraction-free web experience hosted on Vercel',
+      'Previewable directly inside the Live Sites interactive theater',
+    ],
     accentColor: '#E2E8F0',
+    image: '/src/assets/images/ecosystem_jee_tapasya_1795677173640.jpg',
+    imageAlt:
+      'Architectural obsidian monoliths interlocking with luminous optical crystal prisms',
     href: 'https://jeetapasya.vercel.app',
     ctaLabel: 'Open JEE TAPASYA',
     external: true,
   },
   {
     id: 'update-board-tapasya',
-    index: '03',
+    index: '04',
+    category: 'education',
     tag: 'Education Live',
     statusLabel: 'Active Project',
+    stageLabel: 'Student Platform',
+    domainLabel: 'boardtapasya.netlify.app',
     title: 'BOARD TAPASYA — Academic Foundations',
     summary:
       'Dedicated board-level learning platform live on Netlify, designed for steady daily revision and conceptual clarity.',
     detail:
-      'Hosted at boardtapasya.netlify.app alongside JEE TAPASYA to support students across key academic milestones.',
+      'Hosted at boardtapasya.netlify.app alongside JEE TAPASYA to support students building strong academic fundamentals across key school milestones.',
+    highlights: [
+      'Focused structure tailored to board-level academic curricula',
+      'Fast, lightweight web platform built for daily revision clarity',
+      'Directly paired with JEE TAPASYA in our education ecosystem',
+    ],
     accentColor: '#6366F1',
+    image: '/src/assets/images/ecosystem_board_tapasya_1795677174678.jpg',
+    imageAlt:
+      'Ascending layered dark slate plates and translucent cosmic blue architectural glass planes',
     href: 'https://boardtapasya.netlify.app',
     ctaLabel: 'Open BOARD TAPASYA',
     external: true,
   },
   {
     id: 'update-yashraj-frames',
-    index: '04',
+    index: '05',
+    category: 'creative',
     tag: 'Visual Archive',
     statusLabel: 'Active Project',
+    stageLabel: 'Photography',
+    domainLabel: 'yashrajframes.netlify.app',
     title: 'YASHRAJ FRAMES — Photography & Framing',
     summary:
       'An independent visual archive live on the web exploring light, perspective, and intentional photographic storytelling.',
     detail:
-      'Hosted at yashrajframes.netlify.app, bridging visual craft with minimalist digital presentation.',
+      'Hosted at yashrajframes.netlify.app, bridging visual craft with quiet minimalist digital presentation so every photograph speaks on its own.',
+    highlights: [
+      'Curated independent photography & composition showcase',
+      'Minimalist gallery presentation focused on light and framing',
+      'Live interactive preview available inside the ecosystem viewer',
+    ],
     accentColor: '#CBD5E1',
+    image: '/src/assets/images/ecosystem_yashraj_frames_1795677176592.jpg',
+    imageAlt:
+      'Macro studio view of a matte black anodized optical camera lens barrel and precision aperture blades',
     href: 'https://yashrajframes.netlify.app',
     ctaLabel: 'Open YASHRAJ FRAMES',
     external: true,
   },
   {
     id: 'update-yashraj-jadhav',
-    index: '05',
+    index: '06',
+    category: 'creative',
     tag: 'Digital Identity',
     statusLabel: 'Active Project',
+    stageLabel: 'Personal Home',
+    domainLabel: 'yashrajjadhav.netlify.app',
     title: 'YASHRAJ JADHAV — Personal Platform',
     summary:
       'Independent personal web home connecting creative work, ongoing technical explorations, and future ecosystem ideas.',
     detail:
-      'Hosted at yashrajjadhav.netlify.app as a direct window into the builder behind the ecosystem.',
-    accentColor: '#8B5CF6',
+      'Hosted at yashrajjadhav.netlify.app as a direct window into the founder, builder, and creative philosophy driving every platform in this universe.',
+    highlights: [
+      'Central personal web presence for founder Yashraj Jadhav',
+      'Connects ongoing software experiments, visuals, and writing',
+      'Directly linked from the Founder profile & live showcase',
+    ],
+    accentColor: '#4F7DF3',
+    image: '/src/assets/images/ecosystem_yashraj_jadhav_1795677178110.jpg',
+    imageAlt:
+      'Brushed dark titanium frame holding a faceted smoked indigo glass prism above a matte basalt plinth',
     href: 'https://yashrajjadhav.netlify.app',
     ctaLabel: 'Open YASHRAJ JADHAV',
     external: true,

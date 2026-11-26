@@ -10,6 +10,7 @@ import {
   BRAND,
   LEGAL_DOCUMENTS,
   type AppTabId,
+  type ContactDraft,
   type LegalDocId,
 } from './config/siteConfig';
 import { Navigation } from './components/Navigation';
@@ -21,6 +22,7 @@ import { EcosystemVisualization } from './components/EcosystemVisualization';
 import { Updates } from './components/Updates';
 import { Vision } from './components/Vision';
 import { Innovation } from './components/Innovation';
+import { VisionMixer } from './components/VisionMixer';
 import { About } from './components/About';
 import { Founder } from './components/Founder';
 import { Contact } from './components/Contact';
@@ -59,12 +61,16 @@ function parseTabFromHash(hash: string): {
     case 'vision':
     case 'planned':
     case 'innovation':
+    case 'vision-mixer':
+    case 'mixer':
     case 'about':
       return {
         tab: 'vision',
         scrollToId:
           clean === 'planned' || clean === 'innovation'
             ? 'innovation'
+            : clean === 'vision-mixer' || clean === 'mixer'
+            ? 'vision-mixer'
             : clean === 'about'
             ? 'about'
             : undefined,
@@ -112,6 +118,8 @@ export default function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null
   );
+  const [contactDraft, setContactDraft] = useState<ContactDraft | null>(null);
+  const clearContactDraft = useCallback(() => setContactDraft(null), []);
   const { theme, setTheme } = useTheme();
   const prefersReducedMotion = useReducedMotion();
 
@@ -160,7 +168,11 @@ export default function App() {
   }, []);
 
   const navigateTo = useCallback(
-    (tab: AppTabId, options?: { scrollToId?: string }) => {
+    (tab: AppTabId, options?: { scrollToId?: string; draft?: ContactDraft }) => {
+      if (options?.draft) {
+        setContactDraft(options.draft);
+      }
+
       if (tab === 'legal') {
         const targetHash = `#${activeLegalDoc}`;
         if (window.location.hash !== targetHash) {
@@ -290,8 +302,9 @@ export default function App() {
 
             {activeTab === 'vision' && (
               <div className="pt-14 md:pt-16">
-                <Vision />
-                <Innovation />
+                <Vision onNavigate={navigateTo} />
+                <Innovation onNavigate={navigateTo} />
+                <VisionMixer onNavigate={navigateTo} />
                 <About />
               </div>
             )}
@@ -299,7 +312,10 @@ export default function App() {
             {activeTab === 'founder' && (
               <div className="pt-14 md:pt-16">
                 <Founder onNavigate={navigateTo} />
-                <Contact />
+                <Contact
+                  draft={contactDraft}
+                  onClearDraft={clearContactDraft}
+                />
               </div>
             )}
 

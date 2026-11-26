@@ -1,6 +1,11 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowUpRight, Check, Copy, Mail, RotateCcw, Send } from 'lucide-react';
-import { BRAND } from '../config/siteConfig';
+import { BRAND, type ContactDraft } from '../config/siteConfig';
+
+interface ContactProps {
+  draft?: ContactDraft | null;
+  onClearDraft?: () => void;
+}
 
 interface FormValues {
   name: string;
@@ -60,8 +65,12 @@ function validateForm(values: FormValues): FormErrors {
   return errors;
 }
 
-export function Contact() {
-  const [values, setValues] = useState<FormValues>(INITIAL_VALUES);
+export function Contact({ draft, onClearDraft }: ContactProps = {}) {
+  const [values, setValues] = useState<FormValues>(() => ({
+    ...INITIAL_VALUES,
+    subject: draft?.subject ?? '',
+    message: draft?.message ?? '',
+  }));
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<keyof FormValues, boolean>>({
     name: false,
@@ -74,6 +83,18 @@ export function Contact() {
   );
   const [copied, setCopied] = useState(false);
   const [copiedEmail, setCopiedEmail] = useState(false);
+
+  useEffect(() => {
+    if (!draft) return;
+    setSubmittedPayload(null);
+    setValues((prev) => ({
+      ...prev,
+      subject: draft.subject,
+      message: draft.message,
+    }));
+    setErrors({});
+    onClearDraft?.();
+  }, [draft, onClearDraft]);
 
   const buildMailtoHref = (payload: FormValues) => {
     const subject = encodeURIComponent(`[${BRAND.name}] ${payload.subject}`);

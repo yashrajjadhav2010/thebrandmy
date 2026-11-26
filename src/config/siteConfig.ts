@@ -22,6 +22,11 @@ export type LegalDocId =
   | 'disclaimer'
   | 'security';
 
+export interface ContactDraft {
+  subject: string;
+  message: string;
+}
+
 export interface NavItem {
   label: string;
   href: string;

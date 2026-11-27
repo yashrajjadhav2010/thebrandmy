@@ -29,7 +29,7 @@ export function Footer({
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="relative bg-[#050608] hairline-t pt-12 sm:pt-16 pb-28 md:pb-24 overflow-hidden">
+    <footer className="relative bg-[#050608] hairline-t pt-12 sm:pt-16 pb-28 md:pb-12 overflow-hidden">
       <div className="mx-auto max-w-[1360px] px-5 sm:px-8 lg:px-12">
         {/* Permanent Monumental Brand Signature + Interactive 3D Hanging Nimbu Mirchi (Visible on Every Screen) */}
         <div className="relative flex flex-col items-center justify-center overflow-hidden rounded-2xl bg-[#07090F] border border-white/[0.06] min-h-[380px] sm:min-h-[450px] lg:min-h-[500px]">

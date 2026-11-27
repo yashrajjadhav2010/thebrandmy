@@ -190,30 +190,50 @@ function createLemonPBRMaps(maxAnisotropy: number) {
   }
 
   if (cCtx && rCtx) {
-    // Authentic sun-ripened Indian lemon albedo with delicate green-gold polar transitions
+    // Rich, deep sun-ripened Indian Nimbu albedo with layered golden-yellow shades
     const grad = cCtx.createLinearGradient(0, 0, 0, size);
-    grad.addColorStop(0.0, '#728212');
-    grad.addColorStop(0.08, '#c9b30c');
-    grad.addColorStop(0.22, '#f0c40c');
-    grad.addColorStop(0.5, '#ffd716');
-    grad.addColorStop(0.78, '#f0ba08');
-    grad.addColorStop(0.93, '#c89b0a');
-    grad.addColorStop(1.0, '#6c6812');
+    grad.addColorStop(0.0, '#7c5600');
+    grad.addColorStop(0.08, '#b88400');
+    grad.addColorStop(0.24, '#d9a100');
+    grad.addColorStop(0.48, '#e8b600');
+    grad.addColorStop(0.74, '#d29600');
+    grad.addColorStop(0.92, '#9e6d00');
+    grad.addColorStop(1.0, '#5e3e00');
     cCtx.fillStyle = grad;
     cCtx.fillRect(0, 0, size, size);
 
-    // Subtle sun-mottled warm/cool organic patches across the lemon skin
-    for (let i = 0; i < 65; i++) {
+    // Subtle organic longitudinal yellow-gold rind bands for deeper multi-shade realism
+    for (let i = 0; i < 24; i++) {
+      const bx = rand() * size;
+      const bw = 18 + rand() * 44;
+      const bandGrad = cCtx.createLinearGradient(bx - bw, 0, bx + bw, 0);
+      const isWarmDark = rand() > 0.45;
+      bandGrad.addColorStop(0, 'rgba(180, 120, 0, 0)');
+      bandGrad.addColorStop(
+        0.5,
+        isWarmDark ? 'rgba(146, 90, 0, 0.14)' : 'rgba(246, 194, 0, 0.13)'
+      );
+      bandGrad.addColorStop(1, 'rgba(180, 120, 0, 0)');
+      cCtx.fillStyle = bandGrad;
+      cCtx.fillRect(bx - bw, 0, bw * 2, size);
+    }
+
+    // Multi-tonal sun-ripened yellow, honey-gold & deep ochre mottled patches across the skin
+    for (let i = 0; i < 90; i++) {
       const px = rand() * size;
-      const py = (0.1 + rand() * 0.8) * size;
-      const pr = 22 + rand() * 48;
+      const py = (0.08 + rand() * 0.84) * size;
+      const pr = 20 + rand() * 52;
       const patchGrad = cCtx.createRadialGradient(px, py, 0, px, py, pr);
-      if (rand() > 0.35) {
-        patchGrad.addColorStop(0, 'rgba(255, 224, 48, 0.14)');
-        patchGrad.addColorStop(1, 'rgba(255, 224, 48, 0)');
+      const toneRoll = rand();
+      if (toneRoll > 0.62) {
+        patchGrad.addColorStop(0, 'rgba(245, 192, 0, 0.22)');
+        patchGrad.addColorStop(1, 'rgba(245, 192, 0, 0)');
+      } else if (toneRoll > 0.28) {
+        patchGrad.addColorStop(0, 'rgba(196, 130, 0, 0.22)');
+        patchGrad.addColorStop(1, 'rgba(196, 130, 0, 0)');
       } else {
-        patchGrad.addColorStop(0, 'rgba(155, 165, 16, 0.13)');
-        patchGrad.addColorStop(1, 'rgba(155, 165, 16, 0)');
+        patchGrad.addColorStop(0, 'rgba(144, 88, 0, 0.20)');
+        patchGrad.addColorStop(1, 'rgba(144, 88, 0, 0)');
       }
       cCtx.fillStyle = patchGrad;
       cCtx.beginPath();
@@ -221,8 +241,8 @@ function createLemonPBRMaps(maxAnisotropy: number) {
       cCtx.fill();
     }
 
-    // Waxy smooth base roughness (~0.27 -> 69/255)
-    rCtx.fillStyle = 'rgb(72, 72, 72)';
+    // Waxy natural citrus base roughness (~0.30 -> 78/255)
+    rCtx.fillStyle = 'rgb(78, 78, 78)';
     rCtx.fillRect(0, 0, size, size);
 
     // 4,600 realistic concave citrus oil-gland dimples stamped into albedo, roughness, and heightfield
@@ -254,29 +274,29 @@ function createLemonPBRMaps(maxAnisotropy: number) {
         }
       }
 
-      // Deep amber-gold pore recess tint on albedo
-      const poreGrad = cCtx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.25);
-      poreGrad.addColorStop(0, 'rgba(150, 92, 0, 0.30)');
-      poreGrad.addColorStop(0.6, 'rgba(196, 134, 0, 0.10)');
-      poreGrad.addColorStop(1, 'rgba(255, 232, 70, 0)');
+      // Rich dark amber-ochre oil-gland pore recess tint on albedo
+      const poreGrad = cCtx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.3);
+      poreGrad.addColorStop(0, 'rgba(92, 48, 0, 0.44)');
+      poreGrad.addColorStop(0.55, 'rgba(148, 84, 0, 0.18)');
+      poreGrad.addColorStop(1, 'rgba(232, 174, 0, 0)');
       cCtx.fillStyle = poreGrad;
       cCtx.beginPath();
-      cCtx.arc(cx, cy, r * 1.25, 0, Math.PI * 2);
+      cCtx.arc(cx, cy, r * 1.3, 0, Math.PI * 2);
       cCtx.fill();
 
       // Pores are slightly rougher (more matte inside pits, shinier on raised ridges)
-      rCtx.fillStyle = 'rgba(158, 158, 158, 0.48)';
+      rCtx.fillStyle = 'rgba(164, 164, 164, 0.50)';
       rCtx.beginPath();
       rCtx.arc(cx, cy, r * 0.85, 0, Math.PI * 2);
       rCtx.fill();
     }
 
-    // Authentic subtle orchard micro-speckles & tiny natural brown pinpoints (instant photorealism)
-    for (let i = 0; i < 42; i++) {
+    // Authentic subtle orchard micro-speckles & tiny natural brown pinpoints
+    for (let i = 0; i < 48; i++) {
       const fx = rand() * size;
       const fy = (0.14 + rand() * 0.72) * size;
       const fr = 0.8 + rand() * 1.9;
-      cCtx.fillStyle = `rgba(116, 76, 22, ${0.22 + rand() * 0.28})`;
+      cCtx.fillStyle = `rgba(92, 54, 10, ${0.28 + rand() * 0.30})`;
       cCtx.beginPath();
       cCtx.arc(fx, fy, fr, 0, Math.PI * 2);
       cCtx.fill();
@@ -374,46 +394,65 @@ function createChiliPBRMaps(
   }
 
   if (cCtx && rCtx) {
-    // Rich botanical green gradient along chili length (tip -> body -> shoulder)
+    // Deep, rich dark botanical green gradient along chili length (tip -> body -> shoulder)
     const grad = cCtx.createLinearGradient(0, 0, w, 0);
     grad.addColorStop(0.0, tipHex);
-    grad.addColorStop(0.14, baseHex);
-    grad.addColorStop(0.55, highlightHex);
-    grad.addColorStop(0.84, baseHex);
-    grad.addColorStop(1.0, '#103f0c');
+    grad.addColorStop(0.16, baseHex);
+    grad.addColorStop(0.54, highlightHex);
+    grad.addColorStop(0.82, baseHex);
+    grad.addColorStop(1.0, '#041d04');
     cCtx.fillStyle = grad;
     cCtx.fillRect(0, 0, w, h);
 
-    // Subtle botanical chlorophyll striations along the length
-    for (let i = 0; i < 64; i++) {
+    // Organic dark-green mottling patches for realistic multi-shade depth
+    for (let i = 0; i < 45; i++) {
+      const px = (0.08 + rand() * 0.84) * w;
+      const py = rand() * h;
+      const pr = 16 + rand() * 38;
+      const mg = cCtx.createRadialGradient(px, py, 0, px, py, pr);
+      if (rand() > 0.45) {
+        mg.addColorStop(0, 'rgba(3, 28, 5, 0.24)');
+        mg.addColorStop(1, 'rgba(3, 28, 5, 0)');
+      } else {
+        mg.addColorStop(0, 'rgba(32, 118, 22, 0.16)');
+        mg.addColorStop(1, 'rgba(32, 118, 22, 0)');
+      }
+      cCtx.fillStyle = mg;
+      cCtx.beginPath();
+      cCtx.arc(px, py, pr, 0, Math.PI * 2);
+      cCtx.fill();
+    }
+
+    // Deep botanical chlorophyll striations along the length
+    for (let i = 0; i < 72; i++) {
       const sy = rand() * h;
       const sh = 1.5 + rand() * 4.5;
       cCtx.fillStyle =
-        rand() > 0.45
-          ? 'rgba(130, 232, 58, 0.085)'
-          : 'rgba(6, 36, 8, 0.12)';
+        rand() > 0.42
+          ? 'rgba(42, 132, 24, 0.12)'
+          : 'rgba(2, 20, 4, 0.24)';
       cCtx.fillRect(0, sy, w, sh);
     }
 
-    // Subtle lighter chartreuse sun-side glow along mid-body
+    // Subtle rich emerald mid-body depth glow (avoids neon lime washout)
     const sunGrad = cCtx.createRadialGradient(
       w * 0.52,
       h * 0.35,
       8,
       w * 0.52,
       h * 0.35,
-      w * 0.38
+      w * 0.36
     );
-    sunGrad.addColorStop(0, 'rgba(146, 224, 52, 0.16)');
-    sunGrad.addColorStop(1, 'rgba(146, 224, 52, 0)');
+    sunGrad.addColorStop(0, 'rgba(46, 138, 22, 0.15)');
+    sunGrad.addColorStop(1, 'rgba(46, 138, 22, 0)');
     cCtx.fillStyle = sunGrad;
     cCtx.fillRect(0, 0, w, h);
 
-    // Tiny natural organic dark micro-flecks & faint corky heat lines (corking)
-    for (let i = 0; i < 28; i++) {
+    // Natural organic dark micro-flecks & subtle maturity lines
+    for (let i = 0; i < 34; i++) {
       const cx = (0.12 + rand() * 0.76) * w;
       const cy = rand() * h;
-      cCtx.fillStyle = 'rgba(12, 42, 10, 0.22)';
+      cCtx.fillStyle = 'rgba(4, 22, 4, 0.34)';
       cCtx.beginPath();
       cCtx.arc(cx, cy, 0.7 + rand() * 1.4, 0, Math.PI * 2);
       cCtx.fill();
@@ -423,8 +462,8 @@ function createChiliPBRMaps(
     const pierceX = w * 0.57;
     for (const py of [h * 0.25, h * 0.75]) {
       const pGrad = cCtx.createRadialGradient(pierceX, py, 0, pierceX, py, 14);
-      pGrad.addColorStop(0, 'rgba(10, 22, 8, 0.55)');
-      pGrad.addColorStop(1, 'rgba(10, 22, 8, 0)');
+      pGrad.addColorStop(0, 'rgba(3, 12, 3, 0.68)');
+      pGrad.addColorStop(1, 'rgba(3, 12, 3, 0)');
       cCtx.fillStyle = pGrad;
       cCtx.beginPath();
       cCtx.arc(pierceX, py, 14, 0, Math.PI * 2);
@@ -1040,7 +1079,7 @@ export function NimbuMirchi3D() {
     );
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.02;
+    renderer.toneMappingExposure = 0.94;
     renderer.shadowMap.enabled = !isSoftwareGl;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.setClearColor(0x000000, 0);
@@ -1064,12 +1103,12 @@ export function NimbuMirchi3D() {
     camera.lookAt(0, 0.15, 0);
 
     // =========================================================================
-    // MACRO STUDIO PHOTOGRAPHY LIGHTING RIG (Warm Key + Cool Fill + Softboxes + Rim)
+    // MACRO STUDIO PHOTOGRAPHY LIGHTING RIG (Rich Contrast Key + Soft Fill + Rim)
     // =========================================================================
-    const hemiLight = new THREE.HemisphereLight(0xd4e5ff, 0x16120c, 0.44);
+    const hemiLight = new THREE.HemisphereLight(0xd4e5ff, 0x120e08, 0.32);
     scene.add(hemiLight);
 
-    const keyLight = new THREE.DirectionalLight(0xfff4df, 2.05);
+    const keyLight = new THREE.DirectionalLight(0xfff1d6, 1.88);
     keyLight.position.set(3.6, 5.1, 5.4);
     if (!isSoftwareGl) {
       keyLight.castShadow = true;
@@ -1087,25 +1126,25 @@ export function NimbuMirchi3D() {
     }
     scene.add(keyLight);
 
-    // Cool opposite bounce fill for rich shadow depth
-    const fillLight = new THREE.DirectionalLight(0x98baff, 0.34);
+    // Subtle cool opposite bounce fill preserving rich deep shadow modeling
+    const fillLight = new THREE.DirectionalLight(0x8cb0ff, 0.24);
     fillLight.position.set(-4.6, 0.8, 3.6);
     scene.add(fillLight);
 
-    // Warm crisp studio rim backlight to sculpt translucent green tips & lemon edges
-    const rimLight = new THREE.PointLight(0xfff6e3, 6.2, 16, 1.6);
+    // Warm crisp studio rim backlight to sculpt translucent dark-green tips & golden lemon edges
+    const rimLight = new THREE.PointLight(0xfff2d6, 4.6, 16, 1.6);
     rimLight.position.set(-2.4, 3.1, -3.4);
     scene.add(rimLight);
 
     // Secondary softbox specular highlights across glossy waxy skins (GPU only)
     if (!isSoftwareGl) {
       RectAreaLightUniformsLib.init();
-      const softboxKey = new THREE.RectAreaLight(0xfff8eb, 2.6, 2.8, 4.2);
+      const softboxKey = new THREE.RectAreaLight(0xfff5e0, 1.95, 2.8, 4.2);
       softboxKey.position.set(3.4, 2.2, 4.2);
       softboxKey.lookAt(0, 0.1, 0);
       scene.add(softboxKey);
 
-      const softboxRim = new THREE.RectAreaLight(0xdce8ff, 1.5, 2.0, 3.8);
+      const softboxRim = new THREE.RectAreaLight(0xd4e2ff, 0.95, 2.0, 3.8);
       softboxRim.position.set(-3.6, 1.4, 2.8);
       softboxRim.lookAt(0, 0.0, 0);
       scene.add(softboxRim);
@@ -1125,15 +1164,15 @@ export function NimbuMirchi3D() {
     const lemonMaps = createLemonPBRMaps(maxAniso);
     const threadMaps = createBraidedThreadPBRMaps(maxAniso);
 
-    // 7 distinct natural market-fresh Indian green chili color/normal/roughness variants
+    // 7 distinct deep, dark market-fresh Indian Hari Mirch green color/normal/roughness variants
     const chiliPalettes: Array<[string, string, string, number]> = [
-      ['#157c14', '#39ad1f', '#0a4a09', 1103],
-      ['#0e6b11', '#279619', '#073c08', 2207],
-      ['#1e8a16', '#46b822', '#0d500a', 3313],
-      ['#127313', '#2fa11b', '#084109', 4421],
-      ['#198215', '#3eb020', '#0b4b0a', 5527],
-      ['#0d6610', '#238f17', '#063808', 6637],
-      ['#1b8716', '#42b421', '#0c4e09', 7741],
+      ['#0a480b', '#186b12', '#032104', 1103],
+      ['#063b09', '#12590f', '#021a03', 2207],
+      ['#0e520c', '#1e7614', '#042605', 3313],
+      ['#08420a', '#156211', '#031e04', 4421],
+      ['#0c4c0b', '#1b7013', '#042405', 5527],
+      ['#053408', '#0e500d', '#021503', 6637],
+      ['#0d500c', '#1c7314', '#042505', 7741],
     ];
 
     const chiliMapsList = chiliPalettes.map(([base, hi, tip, seed]) =>
@@ -1156,49 +1195,49 @@ export function NimbuMirchi3D() {
       map: threadMaps.map,
       normalMap: threadMaps.normalMap,
       normalScale: new THREE.Vector2(1.15, 1.15),
-      color: 0x20232b,
+      color: 0x1a1c24,
       roughness: 0.94,
       metalness: 0.0,
-      sheen: 0.72,
-      sheenRoughness: 0.84,
-      sheenColor: new THREE.Color(0x6c7484),
-      envMapIntensity: 0.25,
+      sheen: 0.65,
+      sheenRoughness: 0.86,
+      sheenColor: new THREE.Color(0x5a6270),
+      envMapIntensity: 0.2,
     });
 
-    // Matte fibrous olive-green calyx & woody stem (high roughness contrast vs glossy chili body)
+    // Matte fibrous dark olive-green calyx & woody stem (rich roughness contrast vs glossy chili body)
     const calyxMat = new THREE.MeshStandardMaterial({
-      color: 0x2f5a18,
-      roughness: 0.84,
-      metalness: 0.0,
-      envMapIntensity: 0.24,
-    });
-
-    const stemMat = new THREE.MeshStandardMaterial({
-      color: 0x3b661e,
-      roughness: 0.82,
-      metalness: 0.0,
-      envMapIntensity: 0.24,
-    });
-
-    const cutTipMat = new THREE.MeshStandardMaterial({
-      color: 0x87764b,
-      roughness: 0.94,
-      metalness: 0.0,
-      envMapIntensity: 0.18,
-    });
-
-    const lemonCalyxButtonMat = new THREE.MeshStandardMaterial({
-      color: 0x4c5821,
-      roughness: 0.88,
+      color: 0x1b3b0d,
+      roughness: 0.85,
       metalness: 0.0,
       envMapIntensity: 0.2,
     });
 
-    const lemonScarMat = new THREE.MeshStandardMaterial({
-      color: 0x5c4824,
-      roughness: 0.92,
+    const stemMat = new THREE.MeshStandardMaterial({
+      color: 0x244a11,
+      roughness: 0.83,
+      metalness: 0.0,
+      envMapIntensity: 0.2,
+    });
+
+    const cutTipMat = new THREE.MeshStandardMaterial({
+      color: 0x6b5c37,
+      roughness: 0.94,
+      metalness: 0.0,
+      envMapIntensity: 0.16,
+    });
+
+    const lemonCalyxButtonMat = new THREE.MeshStandardMaterial({
+      color: 0x3a4314,
+      roughness: 0.88,
       metalness: 0.0,
       envMapIntensity: 0.18,
+    });
+
+    const lemonScarMat = new THREE.MeshStandardMaterial({
+      color: 0x433114,
+      roughness: 0.92,
+      metalness: 0.0,
+      envMapIntensity: 0.16,
     });
 
     // Fresh glistening condensation water droplets
@@ -1212,42 +1251,42 @@ export function NimbuMirchi3D() {
       reflectivity: 0.9,
       transparent: true,
       opacity: 0.68,
-      envMapIntensity: 1.5,
+      envMapIntensity: 1.45,
       depthWrite: false,
     });
 
-    // Glossy waxy Indian green chili PBR materials + warm-emerald backlit SSS
+    // Deep dark glossy waxy Indian green chili PBR materials + rich forest-emerald backlit SSS
     const chiliMats = chiliMapsList.map((maps) => {
       const mat = new THREE.MeshPhysicalMaterial({
         map: maps.map,
         normalMap: maps.normalMap,
-        normalScale: new THREE.Vector2(0.85, 0.85),
+        normalScale: new THREE.Vector2(0.95, 0.95),
         roughnessMap: maps.roughnessMap,
         roughness: 1.0,
         metalness: 0.0,
-        clearcoat: 0.88,
-        clearcoatRoughness: 0.13,
-        specularIntensity: 0.9,
-        envMapIntensity: 0.38,
+        clearcoat: 0.72,
+        clearcoatRoughness: 0.15,
+        specularIntensity: 0.8,
+        envMapIntensity: 0.26,
       });
-      applyBotanicalSubsurface(mat, 0x5be022, 0.24);
+      applyBotanicalSubsurface(mat, 0x1e8010, 0.15);
       return mat;
     });
 
-    // Dimpled waxy sun-ripe lemon PBR material + warm golden-amber backlit SSS
+    // Dimpled waxy deep golden-yellow lemon PBR material + rich warm amber-gold backlit SSS
     const lemonMat = new THREE.MeshPhysicalMaterial({
       map: lemonMaps.map,
       normalMap: lemonMaps.normalMap,
-      normalScale: new THREE.Vector2(1.15, 1.15),
+      normalScale: new THREE.Vector2(1.22, 1.22),
       roughnessMap: lemonMaps.roughnessMap,
       roughness: 1.0,
       metalness: 0.0,
-      clearcoat: 0.42,
-      clearcoatRoughness: 0.26,
-      specularIntensity: 0.72,
-      envMapIntensity: 0.34,
+      clearcoat: 0.34,
+      clearcoatRoughness: 0.28,
+      specularIntensity: 0.68,
+      envMapIntensity: 0.24,
     });
-    applyBotanicalSubsurface(lemonMat, 0xffaa00, 0.32);
+    applyBotanicalSubsurface(lemonMat, 0xc96e00, 0.16);
 
     disposables.materials.push(
       threadMat,

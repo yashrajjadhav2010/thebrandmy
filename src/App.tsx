@@ -21,6 +21,7 @@ import { Ecosystem } from './components/Ecosystem';
 import { EcosystemVisualization } from './components/EcosystemVisualization';
 import { Updates } from './components/Updates';
 import { Vision } from './components/Vision';
+import { GlobalHQSection } from './components/GlobalHQSection';
 import { Innovation } from './components/Innovation';
 import { VisionMixer } from './components/VisionMixer';
 import { About } from './components/About';
@@ -59,6 +60,8 @@ function parseTabFromHash(hash: string): {
     case 'updates':
       return { tab: 'updates' };
     case 'vision':
+    case 'headquarters':
+    case 'hq':
     case 'planned':
     case 'innovation':
     case 'vision-mixer':
@@ -67,7 +70,9 @@ function parseTabFromHash(hash: string): {
       return {
         tab: 'vision',
         scrollToId:
-          clean === 'planned' || clean === 'innovation'
+          clean === 'headquarters' || clean === 'hq'
+            ? 'headquarters'
+            : clean === 'planned' || clean === 'innovation'
             ? 'innovation'
             : clean === 'vision-mixer' || clean === 'mixer'
             ? 'vision-mixer'
@@ -301,7 +306,8 @@ export default function App() {
             )}
 
             {activeTab === 'vision' && (
-              <div className="pt-14 md:pt-16">
+              <div className="pt-14 md:pt-20">
+                <GlobalHQSection />
                 <Vision onNavigate={navigateTo} />
                 <Innovation onNavigate={navigateTo} />
                 <VisionMixer onNavigate={navigateTo} />

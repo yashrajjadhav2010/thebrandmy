@@ -87,7 +87,8 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: true,
+          // Dev SW registration uses Vite HMR (import.meta.hot.send), which is unavailable when DISABLE_HMR=true.
+          enabled: process.env.DISABLE_HMR !== 'true',
           type: 'module',
         },
       }),

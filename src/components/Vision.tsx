@@ -9,6 +9,7 @@ import {
 import {
   ArrowDown,
   ArrowRight,
+  ArrowUp,
   Compass,
   Layers,
   Sparkles,
@@ -284,8 +285,21 @@ export function Vision({ onNavigate }: VisionProps) {
               </div>
             </div>
 
-            {/* Quick Jump Cue to Interactive Labs */}
+            {/* Quick Jump Cue to 3D Conceptual HQ & Interactive Labs */}
             <div className="mt-8 flex flex-wrap items-center gap-3.5 pt-6 hairline-t">
+              <button
+                type="button"
+                onClick={() =>
+                  document
+                    .getElementById('headquarters')
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+                className="group inline-flex min-h-[46px] items-center gap-2 rounded-full bg-[#F5F7FA] px-5 py-2.5 text-xs sm:text-sm font-semibold text-[#050608] whitespace-nowrap transition-all duration-200 hover:bg-[#DCE7FF] active:scale-[0.98]"
+              >
+                <span>Back to 3D Conceptual HQ</span>
+                <ArrowUp className="h-4 w-4 transition-transform duration-200 group-hover:-translate-y-0.5" />
+              </button>
+
               <button
                 type="button"
                 onClick={() =>
@@ -293,9 +307,9 @@ export function Vision({ onNavigate }: VisionProps) {
                     .getElementById('innovation')
                     ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                 }
-                className="group inline-flex min-h-[46px] items-center gap-2 rounded-full bg-[#F5F7FA] px-5 py-2.5 text-xs sm:text-sm font-semibold text-[#050608] whitespace-nowrap transition-all duration-200 hover:bg-[#DCE7FF] active:scale-[0.98]"
+                className="group inline-flex min-h-[46px] items-center gap-2 rounded-full border border-white/12 bg-[#0A0D14] px-5 py-2.5 text-xs sm:text-sm font-medium text-[#F5F7FA] whitespace-nowrap transition-colors duration-200 hover:border-white/30 hover:bg-[#101521]"
               >
-                <span>Vote on Planned Labs</span>
+                <span>Planned Labs</span>
                 <ArrowDown className="h-4 w-4 transition-transform duration-200 group-hover:translate-y-0.5" />
               </button>
 
